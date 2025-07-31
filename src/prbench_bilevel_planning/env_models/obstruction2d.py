@@ -123,6 +123,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
         def observe(self, x: NDArray[np.float32]) -> None:
             import ipdb; ipdb.set_trace()
 
+
     class GroundPlaceController(GroundParameterizedController):
         """Controller for placing a held block.
         
