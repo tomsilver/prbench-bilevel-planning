@@ -138,8 +138,9 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
             waypoints = self._generate_waypoints(state)
             vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
             plan = self._waypoints_to_plan(state, waypoints, vacuum_during_plan)
-            # Add final action to grasp (TODO)
-            return plan
+            final_action = np.zeros(5, dtype=np.float32)
+            final_action[-1] = vacuum_after_plan
+            return plan + [final_action]
         
         def _get_transfer_y(self, state: ObjectCentricState) -> float:
             # Assumes the ground is at y=0.0.
@@ -211,7 +212,6 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 1.0, 0.0
-
 
     PickController = LiftedParameterizedController(
         [robot, block],
