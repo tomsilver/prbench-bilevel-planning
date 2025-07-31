@@ -29,7 +29,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     # Create the transition function.
     def transition_fn(x: NDArray[np.float32], u: NDArray[np.float32]) -> NDArray[np.float32]:
         """Simulate the action."""
-        sim.reset(options={"init_state": x})
+        sim.reset(options={"init_state": observation_space.devectorize(x)})
         return sim.step(u)[0]
     
     # Types.
@@ -95,7 +95,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     class _CommonGroundController(GroundParameterizedController, abc.ABC):
         """Shared controller code between picking and placing."""
     
-        def __init__(self, objects: Sequence[Object], safe_y: float = 0.9, max_delta: float = 0.1) -> None:
+        def __init__(self, objects: Sequence[Object], safe_y: float = 0.9, max_delta: float = 0.025) -> None:
             robot, block = objects
             assert robot.is_instance(CRVRobotType)
             assert block.is_instance(RectangleType)
@@ -125,7 +125,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
                     continue
                 total_dx = end[0] - start[0]
                 total_dy = end[0] - start[1]
-                num_steps = max(int(np.ceil(abs(total_dx) / self._max_delta), np.ceil(abs(total_dy) / self._max_delta)))
+                num_steps = int(max(np.ceil(abs(total_dx) / self._max_delta), np.ceil(abs(total_dy) / self._max_delta)))
                 dx = total_dx / num_steps
                 dy = total_dy / num_steps
                 action = np.array([dx, dy, 0, 0, vacuum_during_plan], dtype=np.float32)
