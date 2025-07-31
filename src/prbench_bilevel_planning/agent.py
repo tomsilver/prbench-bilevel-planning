@@ -3,30 +3,13 @@
 from prpl_utils.gym_agent import Agent
 from typing import TypeVar, Hashable
 from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
-import numpy as np
-import pytest
-from gymnasium.spaces import Box, Discrete, Tuple
-from relational_structs import (
-    LiftedOperator,
-    Predicate,
-    Type,
-)
 
 from bilevel_planning.abstract_plan_generators.heuristic_search_plan_generator import (
-    HeuristicSearchAbstractPlanGenerator,
     RelationalHeuristicSearchAbstractPlanGenerator,
 )
 from bilevel_planning.bilevel_planners.sesame_planner import SesamePlanner
 from bilevel_planning.structs import (
-    FunctionalGoal,
-    GroundParameterizedController,
-    LiftedParameterizedController,
-    LiftedSkill,
-    ParameterizedController,
     PlanningProblem,
-    RelationalAbstractGoal,
-    RelationalAbstractState,
-    TransitionFailure,
 )
 from bilevel_planning.trajectory_samplers.parameterized_controller_sampler import (
     ParameterizedControllerTrajectorySampler,
