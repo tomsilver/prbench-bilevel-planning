@@ -19,11 +19,11 @@ from bilevel_planning.utils import (
     RelationalControllerGenerator,
 )
 
-_X = TypeVar("_X", bound=Hashable)
+_O = TypeVar("_O", bound=Hashable)
 _U = TypeVar("_U", bound=Hashable)
 
 
-class BilevelPlanningAgent(Agent[_X, _U]):
+class BilevelPlanningAgent(Agent[_O, _U]):
     """A general interface for an agent that runs bilevel planning."""
 
     def __init__(self, env_models: BilevelPlanningEnvModels, seed: int,
@@ -51,8 +51,8 @@ class BilevelPlanningAgent(Agent[_X, _U]):
     
     def _run_planning(self) -> list[_U]:
         # Create planning problem.
-        initial_state = self._last_observation
-        goal = self._env_models.goal_abstractor(self._last_observation)
+        initial_state = self._env_models.observation_to_state(self._last_observation)
+        goal = self._env_models.goal_abstractor(initial_state)
         problem = PlanningProblem(
             self._env_models.state_space,
             self._env_models.action_space,

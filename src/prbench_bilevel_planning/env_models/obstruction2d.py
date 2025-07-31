@@ -2,7 +2,7 @@
 
 from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
 from gymnasium.spaces import Space
-from relational_structs.spaces import ObjectCentricBoxSpace
+from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
 from geom2drobotenvs.utils import CRVRobotActionSpace
 from geom2drobotenvs.object_types import CRVRobotType, RectangleType
 from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
@@ -27,13 +27,22 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     assert sim.action_space == action_space
 
     # Create the transition function.
-    def transition_fn(x: NDArray[np.float32], u: NDArray[np.float32]) -> NDArray[np.float32]:
+    def transition_fn(x: ObjectCentricState, u: NDArray[np.float32]) -> ObjectCentricState:
         """Simulate the action."""
-        sim.reset(options={"init_state": observation_space.devectorize(x)})
-        return sim.step(u)[0]
+        sim.reset(options={"init_state": x})
+        obs, _, _, _, _ = sim.step(u)
+        return observation_to_state(obs)
+    
+    # Convert observations into states. The important thing is that states are hashable.
+    def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
+        """Convert the vectors back into (hashable) object-centric states."""
+        return observation_space.devectorize(o)
     
     # Types.
-    types = {CRVRobotType, RectangleType}
+    types = {CRVRobotType, RectangleType, TargetBlockType, TargetSurfaceType}
+
+    # Create the state space.
+    state_space = ObjectCentricStateSpace(types)
 
     # Predicates.
     Holding = Predicate("Holding", [CRVRobotType, RectangleType])
@@ -43,7 +52,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     predicates = {Holding, HandEmpty, OnTable, OnTarget}
 
     # State abstractor.
-    def state_abstractor(x: NDArray[np.float32]) -> set[GroundAtom]:
+    def state_abstractor(x: ObjectCentricState) -> set[GroundAtom]:
         """Get the abstract state for the current state."""
         # TODO
         robot = CRVRobotType("robot")
@@ -53,7 +62,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
         return RelationalAbstractState(atoms, objects)
     
     # Goal abstractor.
-    def goal_abstractor(x: NDArray[np.float32]) -> set[GroundAtom]:
+    def goal_abstractor(x: ObjectCentricState) -> set[GroundAtom]:
         """The goal is always the same in this environment."""
         target = TargetBlockType("target_block")
         atoms = {GroundAtom(OnTarget, [target])}
@@ -133,7 +142,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
                     plan.append(action)
             return plan
 
-        def reset(self, x: NDArray[np.float32], params: float) -> None:
+        def reset(self, x: ObjectCentricState, params: float) -> None:
             self._params = params
             self._current_plan = self._generate_plan(x)
 
@@ -144,14 +153,13 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
             assert self._current_plan
             return self._current_plan.pop(0)
 
-        def observe(self, x: NDArray[np.float32]) -> None:
+        def observe(self, x: ObjectCentricState) -> None:
             pass
 
-        def _generate_plan(self, x: NDArray[np.float32]) -> list[NDArray[np.float32]]:
-            state = observation_space.devectorize(x)
-            waypoints = self._generate_waypoints(state)
+        def _generate_plan(self, x: ObjectCentricState) -> list[NDArray[np.float32]]:
+            waypoints = self._generate_waypoints(x)
             vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
-            plan = self._waypoints_to_plan(state, waypoints, vacuum_during_plan)
+            plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
             final_action = np.zeros(5, dtype=np.float32)
             final_action[-1] = vacuum_after_plan
             return plan + [final_action]
@@ -172,10 +180,9 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
         the center of the block.
         """
 
-        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
-            state = observation_space.devectorize(x)
-            gripper_width = state.get(self._robot, "gripper_width")
-            block_width = state.get(self._block, "width")
+        def sample_parameters(self, x: ObjectCentricState, rng: np.random.Generator) -> float:
+            gripper_width = x.get(self._robot, "gripper_width")
+            block_width = x.get(self._block, "width")
             radius = (gripper_width + block_width) / 2
             return rng.uniform(-radius, radius)
         
@@ -226,7 +233,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     class GroundPlaceOnTableController(_GroundPlaceController):
         """Controller for placing a held block on the table."""
 
-        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
+        def sample_parameters(self, x: ObjectCentricState, rng: np.random.Generator) -> float:
             world_min_x = 0.0
             world_max_x = 1.0
             return rng.uniform(world_min_x, world_max_x)
@@ -235,10 +242,9 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     class GroundPlaceOnTargetController(_GroundPlaceController):
         """Controller for placing a held block on the target."""
 
-        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
-            state = observation_space.devectorize(x)
-            target_x = state.get("target_surface", "x")
-            target_width = state.get("target_surface", "width")
+        def sample_parameters(self, x: ObjectCentricState, rng: np.random.Generator) -> float:
+            target_x = x.get("target_surface", "x")
+            target_width = x.get("target_surface", "width")
             return rng.uniform(target_x - target_width / 2, target_x + target_width / 2)
 
 
@@ -268,10 +274,12 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     # Finalize the models.
     return BilevelPlanningEnvModels(
         observation_space,
+        state_space,
         action_space,
         transition_fn,
         types,
         predicates,
+        observation_to_state,
         state_abstractor,
         goal_abstractor,
         skills
