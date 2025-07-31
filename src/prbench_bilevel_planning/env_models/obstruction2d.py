@@ -95,7 +95,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     class _CommonGroundController(GroundParameterizedController, abc.ABC):
         """Shared controller code between picking and placing."""
     
-        def __init__(self, objects: Sequence[Object], safe_y: float = 0.9) -> None:
+        def __init__(self, objects: Sequence[Object], safe_y: float = 0.9, max_delta: float = 0.1) -> None:
             robot, block = objects
             assert robot.is_instance(CRVRobotType)
             assert block.is_instance(RectangleType)
@@ -105,6 +105,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
             self._current_params: float = 0.0  # different meanings for subclasses
             self._current_plan: list[NDArray[np.float32]] | None = None
             self._safe_y = safe_y
+            self._max_delta = max_delta
 
         @abc.abstractmethod
         def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
@@ -116,8 +117,21 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
 
         def _waypoints_to_plan(self, state: ObjectCentricState, waypoints: list[tuple[float, float]],
                                vacuum_during_plan: float) -> list[NDArray[np.float32]]:
-            # TODO
-            import ipdb; ipdb.set_trace()
+            current_pos = (state.get(self._robot, "x"), state.get(self._robot, "y"))
+            waypoints = [current_pos] + waypoints
+            plan: list[NDArray[np.float32]] = []
+            for start, end in zip(waypoints[:-1], waypoints[1:]):
+                if np.allclose(start, end):
+                    continue
+                total_dx = end[0] - start[0]
+                total_dy = end[0] - start[1]
+                num_steps = max(int(np.ceil(abs(total_dx) / self._max_delta), np.ceil(abs(total_dy) / self._max_delta)))
+                dx = total_dx / num_steps
+                dy = total_dy / num_steps
+                action = np.array([dx, dy, 0, 0, vacuum_during_plan], dtype=np.float32)
+                for _ in range(num_steps):
+                    plan.append(action)
+            return plan
 
         def reset(self, x: NDArray[np.float32], params: float) -> None:
             self._params = params
