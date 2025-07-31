@@ -196,7 +196,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
             return 0.0, 1.0
 
 
-    class GroundPlaceController(_CommonGroundController):
+    class _GroundPlaceController(_CommonGroundController):
         """Controller for placing a held block.
         
         This controller uses waypoints rather than doing motion planning. This is just
@@ -205,11 +205,6 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
         The parameters for this controller represent the ABSOLUTE x position where the
         robot will release the held block.
         """
-
-        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
-            world_min_x = 0.0
-            world_max_x = 1.0
-            return rng.uniform(world_min_x, world_max_x)
         
         def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
             robot_x = state.get(self._robot, "x")
@@ -226,23 +221,48 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 1.0, 0.0
+        
+    
+    class GroundPlaceOnTableController(_GroundPlaceController):
+        """Controller for placing a held block on the table."""
+
+        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
+            world_min_x = 0.0
+            world_max_x = 1.0
+            return rng.uniform(world_min_x, world_max_x)
+
+
+    class GroundPlaceOnTargetController(_GroundPlaceController):
+        """Controller for placing a held block on the target."""
+
+        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
+            state = observation_space.devectorize(x)
+            target_x = state.get("target_surface", "x")
+            target_width = state.get("target_surface", "width")
+            return rng.uniform(target_x - target_width / 2, target_x + target_width / 2)
+
 
     PickController = LiftedParameterizedController(
         [robot, block],
         GroundPickController,
     )
 
-    PlaceController = LiftedParameterizedController(
+    PlaceOnTableController = LiftedParameterizedController(
         [robot, block],
-        GroundPlaceController,
+        GroundPlaceOnTableController,
+    )
+
+    PlaceOnTargetController = LiftedParameterizedController(
+        [robot, block],
+        GroundPlaceOnTargetController,
     )
 
     # Finalize the skills.
     skills = {
         LiftedSkill(PickFromTableOperator, PickController),
         LiftedSkill(PickFromTargetOperator, PickController),
-        LiftedSkill(PlaceOnTableOperator, PlaceController),
-        LiftedSkill(PlaceOnTargetOperator, PlaceController),
+        LiftedSkill(PlaceOnTableOperator, PlaceOnTableController),
+        LiftedSkill(PlaceOnTargetOperator, PlaceOnTargetController),
     }
 
     # Finalize the models.
