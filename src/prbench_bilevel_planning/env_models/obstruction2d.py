@@ -4,9 +4,10 @@ from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
 from gymnasium.spaces import Space
 from prpl_utils.spaces import FunctionalSpace
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
-from geom2drobotenvs.utils import CRVRobotActionSpace
+from geom2drobotenvs.utils import CRVRobotActionSpace, get_suctioned_objects
 from geom2drobotenvs.object_types import CRVRobotType, RectangleType
 from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
+from geom2drobotenvs.concepts import is_on
 import numpy as np
 from numpy.typing import NDArray
 from relational_structs import Predicate, GroundAtom, LiftedOperator, LiftedAtom, Object, ObjectCentricState
@@ -61,13 +62,31 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
     predicates = {Holding, HandEmpty, OnTable, OnTarget}
 
     # State abstractor.
+    static_state_cache = {}  # being extra safe for now
     def state_abstractor(x: ObjectCentricState) -> set[GroundAtom]:
         """Get the abstract state for the current state."""
-        # TODO
         robot = CRVRobotType("robot")
         target = TargetBlockType("target_block")
-        objects = {robot, target}
+        target_surface = TargetSurfaceType("target_surface")
+        obstructions: set[Object] = set()
+        for i in range(num_obstructions):
+            obstruction = RectangleType(f"obstruction{i}")
+            obstructions.add(obstruction)
+        atoms: set[GroundAtom] = set()
+        # Add holding / handempty atoms.
+        suctioned_objs = {o for o, _ in get_suctioned_objects(x, robot)}
+        for obj in suctioned_objs & (obstructions | {target}):
+            atoms.add(GroundAtom(Holding, [robot, obj]))
+        if not suctioned_objs:
+            atoms.add(GroundAtom(HandEmpty, [robot]))
+        # Add "on" atoms.
+        for block in obstructions | {target}:
+            if is_on(x, block, target_surface, static_state_cache):
+                atoms.add(GroundAtom(OnTarget, [block]))
+            elif block not in suctioned_objs:
+                atoms.add(GroundAtom(OnTable, [block]))
         atoms = {GroundAtom(HandEmpty, [robot]), GroundAtom(OnTable, [target])}
+        objects = {robot, target} | obstructions
         return RelationalAbstractState(atoms, objects)
     
     # Goal abstractor.
