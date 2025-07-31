@@ -41,8 +41,19 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
     # Create the transition function.
     def transition_fn(x: ObjectCentricState, u: tuple[float, ...]) -> ObjectCentricState:
         """Simulate the action."""
+        # NOTE: static objects are not being simulated at all right now. This will
+        # break in other environments. Need to revisit.
         sim.reset(options={"init_state": x})
+
         obs, _, _, _, _ = sim.step(action_to_executable(u))
+
+        # Uncomment to debug.
+        # import imageio.v2 as iio
+        # import time
+        # img = sim.render()
+        # iio.imsave(f"debug/debug-sim-{int(time.time()*1000.0)}.png", img)
+        # print(u)
+
         return observation_to_state(obs)
     
     # Types.
@@ -85,8 +96,8 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
                 atoms.add(GroundAtom(OnTarget, [block]))
             elif block not in suctioned_objs:
                 atoms.add(GroundAtom(OnTable, [block]))
-        atoms = {GroundAtom(HandEmpty, [robot]), GroundAtom(OnTable, [target])}
         objects = {robot, target} | obstructions
+        print(sorted(atoms))
         return RelationalAbstractState(atoms, objects)
     
     # Goal abstractor.
@@ -142,6 +153,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
             super().__init__(objects)
             self._current_params: float = 0.0  # different meanings for subclasses
             self._current_plan: list[NDArray[np.float32]] | None = None
+            self._current_state: ObjectCentricState | None = None
             self._safe_y = safe_y
             self._max_delta = max_delta
 
@@ -162,7 +174,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
                 if np.allclose(start, end):
                     continue
                 total_dx = end[0] - start[0]
-                total_dy = end[0] - start[1]
+                total_dy = end[1] - start[1]
                 num_steps = int(max(np.ceil(abs(total_dx) / self._max_delta), np.ceil(abs(total_dy) / self._max_delta)))
                 dx = total_dx / num_steps
                 dy = total_dy / num_steps
@@ -173,28 +185,37 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
 
         def reset(self, x: ObjectCentricState, params: float) -> None:
             self._params = params
-            self._current_plan = self._generate_plan(x)
+            self._current_plan = None
+            self._current_state = x
 
         def terminated(self) -> bool:
             return self._current_plan is not None and len(self._current_plan) == 0
 
         def step(self) -> NDArray[np.float32]:
-            assert self._current_plan
+            # Always extend the arm first before planning.
+            assert self._current_state is not None
+            if self._current_state.get(self._robot, "arm_joint") <= 0.15:
+                return (0, 0, 0, executable_space.high[3], 0)
+            if self._current_plan is None:
+                self._current_plan = self._generate_plan(self._current_state)
             return self._current_plan.pop(0)
 
         def observe(self, x: ObjectCentricState) -> None:
-            pass
+            self._current_state = x
 
-        def _generate_plan(self, x: ObjectCentricState) -> list[NDArray[np.float32]]:
+        def _generate_plan(self, x: ObjectCentricState) -> list[tuple[float, ...]]:
             waypoints = self._generate_waypoints(x)
             vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
-            plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
+            waypoint_plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
             final_action = (0, 0, 0, 0, vacuum_after_plan)
-            return plan + [final_action]
+            return waypoint_plan + [final_action]
         
         def _get_transfer_y(self, state: ObjectCentricState) -> float:
-            # Assumes the ground is at y=0.0.
-            return state.get(self._block, "height") + state.get(self._robot, "arm_length") + state.get(self._robot, "gripper_height")
+            surface = state.get_objects(TargetSurfaceType)[0]
+            ground = state.get(surface, "y") + state.get(surface, "height")
+            padding = 1e-6 # TODO figure out where this needs to come from...
+            transfer_y = ground + state.get(self._block, "height") + state.get(self._robot, "arm_joint") + state.get(self._robot, "gripper_width") + padding
+            return transfer_y
 
 
     class GroundPickController(_CommonGroundController):
@@ -208,9 +229,9 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         """
 
         def sample_parameters(self, x: ObjectCentricState, rng: np.random.Generator) -> float:
-            gripper_width = x.get(self._robot, "gripper_width")
+            gripper_height = x.get(self._robot, "gripper_height")
             block_width = x.get(self._block, "width")
-            radius = (gripper_width + block_width) / 2
+            radius = (gripper_height + block_width) / 2
             return rng.uniform(-radius, radius)
         
         def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
@@ -270,8 +291,10 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         """Controller for placing a held block on the target."""
 
         def sample_parameters(self, x: ObjectCentricState, rng: np.random.Generator) -> float:
-            target_x = x.get("target_surface", "x")
-            target_width = x.get("target_surface", "width")
+            # TODO account for gripper displacement also
+            surface = x.get_objects(TargetSurfaceType)[0]
+            target_x = x.get(surface, "x")
+            target_width = x.get(surface, "width")
             return rng.uniform(target_x - target_width / 2, target_x + target_width / 2)
 
 
