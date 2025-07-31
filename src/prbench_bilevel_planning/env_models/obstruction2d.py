@@ -64,29 +64,29 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
         "PickFromTable",
         [robot, block],
         preconditions={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnTable, [block])},
-        add_effects={LiftedAtom(Holding([robot, block]))},
+        add_effects={LiftedAtom(Holding, [robot, block])},
         delete_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnTable, [block])},
     )
     PickFromTargetOperator = LiftedOperator(
         "PickFromTarget",
         [robot, block],
         preconditions={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnTarget, [block])},
-        add_effects={LiftedAtom(Holding([robot, block]))},
+        add_effects={LiftedAtom(Holding, [robot, block])},
         delete_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnTarget, [block])},
     )
     PlaceOnTableOperator = LiftedOperator(
         "PlaceOnTable",
         [robot, block],
-        preconditions={LiftedAtom(Holding([robot, block]))},
+        preconditions={LiftedAtom(Holding, [robot, block])},
         add_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnTable, [block])},
-        delete_effects={LiftedAtom(Holding([robot, block]))},
+        delete_effects={LiftedAtom(Holding, [robot, block])},
     )
     PlaceOnTargetOperator = LiftedOperator(
         "PlaceOnTarget",
         [robot, block],
-        preconditions={LiftedAtom(Holding([robot, block]))},
+        preconditions={LiftedAtom(Holding, [robot, block])},
         add_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnTarget, [block])},
-        delete_effects={LiftedAtom(Holding([robot, block]))},
+        delete_effects={LiftedAtom(Holding, [robot, block])},
     )
 
     # Controllers.
@@ -102,8 +102,8 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
 
         def __init__(self, objects: Sequence[Object]) -> None:
             robot, block = objects
-            assert isinstance(robot, CRVRobotType)
-            assert isinstance(block, RectangleType)
+            assert robot.is_instance(CRVRobotType)
+            assert block.is_instance(RectangleType)
             self._robot = robot
             self._block = block
             super().__init__(objects)
@@ -135,8 +135,8 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
 
         def __init__(self, objects: Sequence[Object]) -> None:
             robot, block = objects
-            assert isinstance(robot, CRVRobotType)
-            assert isinstance(block, RectangleType)
+            assert robot.is_instance(CRVRobotType)
+            assert block.is_instance(RectangleType)
             self._robot = robot
             self._block = block
             super().__init__(objects)
