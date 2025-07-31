@@ -21,7 +21,8 @@ def test_obstruction_2d_bilevel_planning(num_obstructions):
     if MAKE_VIDEOS:
         env = RecordVideo(env, "unit_test_videos", name_prefix=env.spec.id)
 
-    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space)
+    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
+                                                num_obstructions=num_obstructions)
     agent = BilevelPlanningAgent(env_models, seed=123)
 
     obs, info = env.reset(seed=123)

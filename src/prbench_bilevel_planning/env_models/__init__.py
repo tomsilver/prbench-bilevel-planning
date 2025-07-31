@@ -1,4 +1,4 @@
-"""Env models."""
+"""Dynamically load bilevel planning env models."""
 
 from gymnasium.spaces import Space
 from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
@@ -8,7 +8,8 @@ import sys
 
 
 
-def create_bilevel_planning_models(env_name: str, observation_space: Space, action_space: Space) -> BilevelPlanningEnvModels:
+def create_bilevel_planning_models(env_name: str, observation_space: Space, action_space: Space,
+                                   **kwargs) -> BilevelPlanningEnvModels:
     """Load bilevel planning models for the given environment."""
     current_file = Path(__file__).resolve()
     env_path = current_file.parent / f"{env_name}.py"
@@ -28,4 +29,4 @@ def create_bilevel_planning_models(env_name: str, observation_space: Space, acti
     if not hasattr(module, "create_bilevel_planning_models"):
         raise AttributeError(f"{env_path} does not define `create_bilevel_planning_models`")
 
-    return module.create_bilevel_planning_models(observation_space, action_space)
+    return module.create_bilevel_planning_models(observation_space, action_space, **kwargs)
