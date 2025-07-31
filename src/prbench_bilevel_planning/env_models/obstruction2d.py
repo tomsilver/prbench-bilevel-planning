@@ -8,10 +8,11 @@ from geom2drobotenvs.object_types import CRVRobotType, RectangleType
 from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
 import numpy as np
 from numpy.typing import NDArray
-from relational_structs import Predicate, GroundAtom, LiftedOperator, LiftedAtom, Object
+from relational_structs import Predicate, GroundAtom, LiftedOperator, LiftedAtom, Object, ObjectCentricState
 from typing import Sequence
 from bilevel_planning.structs import RelationalAbstractState, RelationalAbstractGoal, GroundParameterizedController, LiftedParameterizedController, LiftedSkill
 import prbench
+import abc
 
 
 def create_bilevel_planning_models(observation_space: Space, action_space: Space,
@@ -91,16 +92,9 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     )
 
     # Controllers.
-    class GroundPickController(GroundParameterizedController):
-        """Controller for picking a block when the robot's hand is free.
-        
-        This controller uses waypoints rather than doing motion planning. This is just
-        because the environment is simple enough where waypoints should always work.
-
-        The parameters for this controller represent the grasp x position RELATIVE to 
-        the center of the block.
-        """
-
+    class _CommonGroundController(GroundParameterizedController, abc.ABC):
+        """Shared controller code between picking and placing."""
+    
         def __init__(self, objects: Sequence[Object], safe_y: float = 0.9) -> None:
             robot, block = objects
             assert robot.is_instance(CRVRobotType)
@@ -108,16 +102,22 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
             self._robot = robot
             self._block = block
             super().__init__(objects)
-            self._current_params: float = 0.0
+            self._current_params: float = 0.0  # different meanings for subclasses
             self._current_plan: list[NDArray[np.float32]] | None = None
             self._safe_y = safe_y
 
-        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
-            state = observation_space.devectorize(x)
-            gripper_width = state.get(self._robot, "gripper_width")
-            block_width = state.get(self._block, "width")
-            radius = (gripper_width + block_width) / 2
-            return rng.uniform(-radius, radius)
+        @abc.abstractmethod
+        def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
+            """Generate a waypoint plan."""
+
+        @abc.abstractmethod
+        def _get_vacuum_actions(self) -> tuple[float, float]:
+            """Get vacuum actions for during and after waypoint movement."""
+
+        def _waypoints_to_plan(self, state: ObjectCentricState, waypoints: list[tuple[float, float]],
+                               vacuum_during_plan: float) -> list[NDArray[np.float32]]:
+            # TODO
+            import ipdb; ipdb.set_trace()
 
         def reset(self, x: NDArray[np.float32], params: float) -> None:
             self._params = params
@@ -135,10 +135,40 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
 
         def _generate_plan(self, x: NDArray[np.float32]) -> list[NDArray[np.float32]]:
             state = observation_space.devectorize(x)
+            waypoints = self._generate_waypoints(state)
+            vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
+            plan = self._waypoints_to_plan(state, waypoints, vacuum_during_plan)
+            # Add final action to grasp (TODO)
+            return plan
+        
+        def _get_transfer_y(self, state: ObjectCentricState) -> float:
+            # Assumes the ground is at y=0.0.
+            return state.get(self._block, "height") + state.get(self._robot, "arm_length") + state.get(self._robot, "gripper_height")
+
+
+
+    class GroundPickController(_CommonGroundController):
+        """Controller for picking a block when the robot's hand is free.
+        
+        This controller uses waypoints rather than doing motion planning. This is just
+        because the environment is simple enough where waypoints should always work.
+
+        The parameters for this controller represent the grasp x position RELATIVE to 
+        the center of the block.
+        """
+
+        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
+            state = observation_space.devectorize(x)
+            gripper_width = state.get(self._robot, "gripper_width")
+            block_width = state.get(self._block, "width")
+            radius = (gripper_width + block_width) / 2
+            return rng.uniform(-radius, radius)
+        
+        def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
             robot_x = state.get(self._robot, "x")
             target_x = state.get(self._block, "x") + self._params
-            target_y = state.get(self._block, "y") + state.get(self._block, "height") + state.get(self._robot, "arm_length") + state.get(self._robot, "gripper_height")
-            waypoints = [
+            target_y = self._get_transfer_y(state)
+            return [
                 # Start by moving to safe height (may already be there).
                 (robot_x, self._safe_y),
                 # Move to above the target block, offset by params.
@@ -146,14 +176,12 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
                 # Move down to grasp.
                 (target_x, target_y),
             ]
-            # Generate movement plan.
-            plan = self._waypoints_to_plan(waypoints)
-            # Add final action to grasp (TODO)
-            return plan
+
+        def _get_vacuum_actions(self) -> tuple[float, float]:
+            return 0.0, 1.0
 
 
-
-    class GroundPlaceController(GroundParameterizedController):
+    class GroundPlaceController(_CommonGroundController):
         """Controller for placing a held block.
         
         This controller uses waypoints rather than doing motion planning. This is just
@@ -163,28 +191,26 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
         robot will release the held block.
         """
 
-        def __init__(self, objects: Sequence[Object]) -> None:
-            robot, block = objects
-            assert robot.is_instance(CRVRobotType)
-            assert block.is_instance(RectangleType)
-            self._robot = robot
-            self._block = block
-            super().__init__(objects)
-
         def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
-            import ipdb; ipdb.set_trace()
+            world_min_x = 0.0
+            world_max_x = 1.0
+            return rng.uniform(world_min_x, world_max_x)
+        
+        def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
+            robot_x = state.get(self._robot, "x")
+            target_x = self._params
+            target_y = self._get_transfer_y(state)
+            return [
+                # Start by moving to safe height (may already be there).
+                (robot_x, self._safe_y),
+                # Move to above the target position.
+                (target_x, self._safe_y),
+                # Move down to place.
+                (target_x, target_y),
+            ]
 
-        def reset(self, x: NDArray[np.float32], params: float) -> None:
-            import ipdb; ipdb.set_trace()
-
-        def terminated(self) -> bool:
-            import ipdb; ipdb.set_trace()
-
-        def step(self) -> NDArray[np.float32]:
-            import ipdb; ipdb.set_trace()
-
-        def observe(self, x: NDArray[np.float32]) -> None:
-            import ipdb; ipdb.set_trace()
+        def _get_vacuum_actions(self) -> tuple[float, float]:
+            return 1.0, 0.0
 
 
     PickController = LiftedParameterizedController(
