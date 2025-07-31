@@ -7,8 +7,9 @@ from geom2drobotenvs.utils import CRVRobotActionSpace
 from geom2drobotenvs.object_types import CRVRobotType, RectangleType
 import numpy as np
 from numpy.typing import NDArray
-from relational_structs import Predicate, GroundAtom, LiftedOperator, LiftedAtom
-from bilevel_planning.structs import RelationalAbstractState, RelationalAbstractGoal
+from relational_structs import Predicate, GroundAtom, LiftedOperator, LiftedAtom, Object
+from typing import Sequence
+from bilevel_planning.structs import RelationalAbstractState, RelationalAbstractGoal, GroundParameterizedController, LiftedParameterizedController, LiftedSkill
 import prbench
 
 
@@ -89,9 +90,90 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     )
 
     # Controllers.
+    class GroundPickController(GroundParameterizedController):
+        """Controller for picking a block when the robot's hand is free.
+        
+        This controller uses waypoints rather than doing motion planning. This is just
+        because the environment is simple enough where waypoints should always work.
+
+        The parameters for this controller represent the grasp x position RELATIVE to 
+        the center of the block.
+        """
+
+        def __init__(self, objects: Sequence[Object]) -> None:
+            robot, block = objects
+            assert isinstance(robot, CRVRobotType)
+            assert isinstance(block, RectangleType)
+            self._robot = robot
+            self._block = block
+            super().__init__(objects)
+
+        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
+            import ipdb; ipdb.set_trace()
+
+        def reset(self, x: NDArray[np.float32], params: float) -> None:
+            import ipdb; ipdb.set_trace()
+
+        def terminated(self) -> bool:
+            import ipdb; ipdb.set_trace()
+
+        def step(self) -> NDArray[np.float32]:
+            import ipdb; ipdb.set_trace()
+
+        def observe(self, x: NDArray[np.float32]) -> None:
+            import ipdb; ipdb.set_trace()
+
+    class GroundPlaceController(GroundParameterizedController):
+        """Controller for placing a held block.
+        
+        This controller uses waypoints rather than doing motion planning. This is just
+        because the environment is simple enough where waypoints should always work.
+
+        The parameters for this controller represent the ABSOLUTE x position where the
+        robot will release the held block.
+        """
+
+        def __init__(self, objects: Sequence[Object]) -> None:
+            robot, block = objects
+            assert isinstance(robot, CRVRobotType)
+            assert isinstance(block, RectangleType)
+            self._robot = robot
+            self._block = block
+            super().__init__(objects)
+
+        def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
+            import ipdb; ipdb.set_trace()
+
+        def reset(self, x: NDArray[np.float32], params: float) -> None:
+            import ipdb; ipdb.set_trace()
+
+        def terminated(self) -> bool:
+            import ipdb; ipdb.set_trace()
+
+        def step(self) -> NDArray[np.float32]:
+            import ipdb; ipdb.set_trace()
+
+        def observe(self, x: NDArray[np.float32]) -> None:
+            import ipdb; ipdb.set_trace()
+
+
+    PickController = LiftedParameterizedController(
+        [robot, block],
+        GroundPickController,
+    )
+
+    PlaceController = LiftedParameterizedController(
+        [robot, block],
+        GroundPlaceController,
+    )
 
     # Finalize the skills.
-
+    skills = {
+        LiftedSkill(PickFromTableOperator, PickController),
+        LiftedSkill(PickFromTargetOperator, PickController),
+        LiftedSkill(PlaceOnTableOperator, PlaceController),
+        LiftedSkill(PlaceOnTargetOperator, PlaceController),
+    }
 
     # Finalize the models.
     return BilevelPlanningEnvModels(
