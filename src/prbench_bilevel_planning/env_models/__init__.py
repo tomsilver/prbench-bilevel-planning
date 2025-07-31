@@ -8,7 +8,7 @@ import sys
 
 
 
-def create_bilevel_planning_models(env_name: str, observation_space: Space, action_space: Space,
+def create_bilevel_planning_models(env_name: str, observation_space: Space, executable_space: Space,
                                    **kwargs) -> BilevelPlanningEnvModels:
     """Load bilevel planning models for the given environment."""
     current_file = Path(__file__).resolve()
@@ -29,4 +29,4 @@ def create_bilevel_planning_models(env_name: str, observation_space: Space, acti
     if not hasattr(module, "create_bilevel_planning_models"):
         raise AttributeError(f"{env_path} does not define `create_bilevel_planning_models`")
 
-    return module.create_bilevel_planning_models(observation_space, action_space, **kwargs)
+    return module.create_bilevel_planning_models(observation_space, executable_space, **kwargs)

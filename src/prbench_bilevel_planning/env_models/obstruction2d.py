@@ -2,6 +2,7 @@
 
 from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
 from gymnasium.spaces import Space
+from prpl_utils.spaces import FunctionalSpace
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
 from geom2drobotenvs.utils import CRVRobotActionSpace
 from geom2drobotenvs.object_types import CRVRobotType, RectangleType
@@ -15,34 +16,42 @@ import prbench
 import abc
 
 
-def create_bilevel_planning_models(observation_space: Space, action_space: Space,
+def create_bilevel_planning_models(observation_space: Space, executable_space: Space,
                                    num_obstructions: int) -> BilevelPlanningEnvModels:
     """Create the env models for obstruction 2D."""
     assert isinstance(observation_space, ObjectCentricBoxSpace)
-    assert isinstance(action_space, CRVRobotActionSpace)
+    assert isinstance(executable_space, CRVRobotActionSpace)
 
     # Make a local copy of the environment to use as the "simulator".
     sim = prbench.make(f"prbench/Obstruction2D-o{num_obstructions}-v0")
     assert sim.observation_space == observation_space
-    assert sim.action_space == action_space
-
-    # Create the transition function.
-    def transition_fn(x: ObjectCentricState, u: NDArray[np.float32]) -> ObjectCentricState:
-        """Simulate the action."""
-        sim.reset(options={"init_state": x})
-        obs, _, _, _, _ = sim.step(u)
-        return observation_to_state(obs)
+    assert sim.action_space == executable_space
     
     # Convert observations into states. The important thing is that states are hashable.
     def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
         """Convert the vectors back into (hashable) object-centric states."""
         return observation_space.devectorize(o)
     
+    # Convert actions into executable actions. Actions must be hashable.
+    def action_to_executable(action: tuple[float, ...]) -> NDArray[np.float32]:
+        """Convert actions into executables."""
+        return np.array(action, dtype=np.float32)
+    
+    # Create the transition function.
+    def transition_fn(x: ObjectCentricState, u: tuple[float, ...]) -> ObjectCentricState:
+        """Simulate the action."""
+        sim.reset(options={"init_state": x})
+        obs, _, _, _, _ = sim.step(action_to_executable(u))
+        return observation_to_state(obs)
+    
     # Types.
     types = {CRVRobotType, RectangleType, TargetBlockType, TargetSurfaceType}
 
     # Create the state space.
     state_space = ObjectCentricStateSpace(types)
+
+    # Create the action space.
+    action_space = FunctionalSpace(contains_fn=lambda x: isinstance(x, tuple))  # weak
 
     # Predicates.
     Holding = Predicate("Holding", [CRVRobotType, RectangleType])
@@ -64,6 +73,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     # Goal abstractor.
     def goal_abstractor(x: ObjectCentricState) -> set[GroundAtom]:
         """The goal is always the same in this environment."""
+        del x  # not needed
         target = TargetBlockType("target_block")
         atoms = {GroundAtom(OnTarget, [target])}
         return RelationalAbstractGoal(atoms, state_abstractor)
@@ -137,7 +147,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
                 num_steps = int(max(np.ceil(abs(total_dx) / self._max_delta), np.ceil(abs(total_dy) / self._max_delta)))
                 dx = total_dx / num_steps
                 dy = total_dy / num_steps
-                action = np.array([dx, dy, 0, 0, vacuum_during_plan], dtype=np.float32)
+                action = (dx, dy, 0, 0, vacuum_during_plan)
                 for _ in range(num_steps):
                     plan.append(action)
             return plan
@@ -160,14 +170,12 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
             waypoints = self._generate_waypoints(x)
             vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
             plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
-            final_action = np.zeros(5, dtype=np.float32)
-            final_action[-1] = vacuum_after_plan
+            final_action = (0, 0, 0, 0, vacuum_after_plan)
             return plan + [final_action]
         
         def _get_transfer_y(self, state: ObjectCentricState) -> float:
             # Assumes the ground is at y=0.0.
             return state.get(self._block, "height") + state.get(self._robot, "arm_length") + state.get(self._robot, "gripper_height")
-
 
 
     class GroundPickController(_CommonGroundController):
@@ -274,12 +282,14 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     # Finalize the models.
     return BilevelPlanningEnvModels(
         observation_space,
+        executable_space,
         state_space,
         action_space,
         transition_fn,
         types,
         predicates,
         observation_to_state,
+        action_to_executable,
         state_abstractor,
         goal_abstractor,
         skills
