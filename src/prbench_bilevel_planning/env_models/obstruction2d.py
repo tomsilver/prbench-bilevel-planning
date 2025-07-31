@@ -5,6 +5,7 @@ from gymnasium.spaces import Space
 from relational_structs.spaces import ObjectCentricBoxSpace
 from geom2drobotenvs.utils import CRVRobotActionSpace
 from geom2drobotenvs.object_types import CRVRobotType, RectangleType
+from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
 import numpy as np
 from numpy.typing import NDArray
 from relational_structs import Predicate, GroundAtom, LiftedOperator, LiftedAtom, Object
@@ -45,7 +46,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
         """Get the abstract state for the current state."""
         # TODO
         robot = CRVRobotType("robot")
-        target = RectangleType("target")
+        target = TargetBlockType("target_block")
         objects = {robot, target}
         atoms = {GroundAtom(HandEmpty, [robot]), GroundAtom(OnTable, [target])}
         return RelationalAbstractState(atoms, objects)
@@ -53,7 +54,7 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
     # Goal abstractor.
     def goal_abstractor(x: NDArray[np.float32]) -> set[GroundAtom]:
         """The goal is always the same in this environment."""
-        target = RectangleType("target")
+        target = TargetBlockType("target_block")
         atoms = {GroundAtom(OnTarget, [target])}
         return RelationalAbstractGoal(atoms, state_abstractor)
     
@@ -100,28 +101,56 @@ def create_bilevel_planning_models(observation_space: Space, action_space: Space
         the center of the block.
         """
 
-        def __init__(self, objects: Sequence[Object]) -> None:
+        def __init__(self, objects: Sequence[Object], safe_y: float = 0.9) -> None:
             robot, block = objects
             assert robot.is_instance(CRVRobotType)
             assert block.is_instance(RectangleType)
             self._robot = robot
             self._block = block
             super().__init__(objects)
+            self._current_params: float = 0.0
+            self._current_plan: list[NDArray[np.float32]] | None = None
+            self._safe_y = safe_y
 
         def sample_parameters(self, x: NDArray[np.float32], rng: np.random.Generator) -> float:
-            import ipdb; ipdb.set_trace()
+            state = observation_space.devectorize(x)
+            gripper_width = state.get(self._robot, "gripper_width")
+            block_width = state.get(self._block, "width")
+            radius = (gripper_width + block_width) / 2
+            return rng.uniform(-radius, radius)
 
         def reset(self, x: NDArray[np.float32], params: float) -> None:
-            import ipdb; ipdb.set_trace()
+            self._params = params
+            self._current_plan = self._generate_plan(x)
 
         def terminated(self) -> bool:
-            import ipdb; ipdb.set_trace()
+            return self._current_plan is not None and len(self._current_plan) == 0
 
         def step(self) -> NDArray[np.float32]:
-            import ipdb; ipdb.set_trace()
+            assert self._current_plan
+            return self._current_plan.pop(0)
 
         def observe(self, x: NDArray[np.float32]) -> None:
-            import ipdb; ipdb.set_trace()
+            pass
+
+        def _generate_plan(self, x: NDArray[np.float32]) -> list[NDArray[np.float32]]:
+            state = observation_space.devectorize(x)
+            robot_x = state.get(self._robot, "x")
+            target_x = state.get(self._block, "x") + self._params
+            target_y = state.get(self._block, "y") + state.get(self._block, "height") + state.get(self._robot, "arm_length") + state.get(self._robot, "gripper_height")
+            waypoints = [
+                # Start by moving to safe height (may already be there).
+                (robot_x, self._safe_y),
+                # Move to above the target block, offset by params.
+                (target_x, self._safe_y),
+                # Move down to grasp.
+                (target_x, target_y),
+            ]
+            # Generate movement plan.
+            plan = self._waypoints_to_plan(waypoints)
+            # Add final action to grasp (TODO)
+            return plan
+
 
 
     class GroundPlaceController(GroundParameterizedController):

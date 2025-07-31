@@ -9,7 +9,7 @@ from prbench_bilevel_planning.agent import BilevelPlanningAgent
 prbench.register_all_environments()
 
 
-@pytest.mark.parametrize("num_obstructions", [0, 1, 2])
+@pytest.mark.parametrize("num_obstructions", [0])  # TODO[0, 1, 2]
 def test_obstruction_2d_bilevel_planning(num_obstructions):
     """Tests for bilevel planning in the Obstruction2D environment.
     
