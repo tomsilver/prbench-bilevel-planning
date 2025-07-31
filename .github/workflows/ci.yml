@@ -29,9 +29,10 @@ jobs:
     - name: Set up Python ${{ matrix.python-version }}
       run: uv python install ${{ matrix.python-version }}    
     - name: Install the project
-      run: uv sync --all-extras --dev
-      run: uv pip install third-party/bilevel-planning
-      run: uv pip install third-party/prbench
+      run: |
+        uv sync --all-extras --dev
+        uv pip install third-party/bilevel-planning
+        uv pip install third-party/prbench
     - name: Lint
       run: |
         uv run pytest . --pylint -m pylint --pylint-rcfile=.pylintrc
@@ -50,9 +51,10 @@ jobs:
     - name: Set up Python ${{ matrix.python-version }}
       run: uv python install ${{ matrix.python-version }}
     - name: Install the project
-      run: uv sync --all-extras --dev
-      run: uv pip install third-party/bilevel-planning
-      run: uv pip install third-party/prbench
+      run: |
+        uv sync --all-extras --dev
+        uv pip install third-party/bilevel-planning
+        uv pip install third-party/prbench
     - name: Mypy
       run: |
         uv run mypy .
@@ -75,9 +77,10 @@ jobs:
     - name: Set up Python ${{ matrix.python-version }}
       run: uv python install ${{ matrix.python-version }}    
     - name: Install the project
-      run: uv sync --all-extras --dev
-      run: uv pip install third-party/bilevel-planning
-      run: uv pip install third-party/prbench
+      run: |
+        uv sync --all-extras --dev
+        uv pip install third-party/bilevel-planning
+        uv pip install third-party/prbench
     - name: Pytest
       run: |
        uv run pytest tests/
