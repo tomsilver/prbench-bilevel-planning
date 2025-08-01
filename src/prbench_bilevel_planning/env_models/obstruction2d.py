@@ -155,7 +155,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
     class _CommonGroundController(GroundParameterizedController, abc.ABC):
         """Shared controller code between picking and placing."""
     
-        def __init__(self, objects: Sequence[Object], safe_y: float = 0.9, max_delta: float = 0.025) -> None:
+        def __init__(self, objects: Sequence[Object], safe_y: float = 0.8, max_delta: float = 0.025) -> None:
             robot, block = objects
             assert robot.is_instance(CRVRobotType)
             assert block.is_instance(RectangleType)
@@ -192,6 +192,16 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
                 action = (dx, dy, 0, 0, vacuum_during_plan)
                 for _ in range(num_steps):
                     plan.append(action)
+            
+            # TODO remove
+            x, y = current_pos
+            for action in plan:
+                x += action[0]
+                y += action[1]
+            assert np.isclose(x, waypoints[-1][0])
+            assert np.isclose(y, waypoints[-1][1])
+            print("FINAL WAYPOINT: ", waypoints[-1])
+
             return plan
 
         def reset(self, x: ObjectCentricState, params: float) -> None:
@@ -354,11 +364,10 @@ def get_robot_transfer_position(block: Object, state: ObjectCentricState,
                                 robot_arm_joint: float,
                              relative_x_offset: float = 0) -> tuple[float, float]:
     """Get the x, y position that the robot should be at to place or grasp the block."""
-    # TODO incorporate into controller
     robot = state.get_objects(CRVRobotType)[0]
     surface = state.get_objects(TargetSurfaceType)[0]
     ground = state.get(surface, "y") + state.get(surface, "height")
     padding = 1e-6
     x = block_x + relative_x_offset
-    y = ground + state.get(block, "height") + robot_arm_joint + state.get(robot, "gripper_width") + padding
+    y = ground + state.get(block, "height") + robot_arm_joint + state.get(robot, "gripper_width") / 2 + padding
     return (x, y)

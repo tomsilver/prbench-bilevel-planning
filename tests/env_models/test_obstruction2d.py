@@ -134,11 +134,11 @@ def test_obstruction2d_state_abstractor():
     assert OnTarget([target_block]) in abstract_state3.atoms
 
 
-def _skill_test_helper(ground_skill, env_models, env, current_obs,
+def _skill_test_helper(ground_skill, env_models, env, obs,
                        assert_abstract_state_correct=True,
                        params=None):
     rng = np.random.default_rng(123)
-    state = env_models.observation_to_state(current_obs)
+    state = env_models.observation_to_state(obs)
     abstract_state = env_models.state_abstractor(state)
     operator = ground_skill.operator
     assert operator.preconditions.issubset(abstract_state.atoms)
