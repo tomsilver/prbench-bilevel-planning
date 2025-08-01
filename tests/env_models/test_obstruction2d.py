@@ -116,6 +116,13 @@ def test_state_abstractor():
     state2.set(robot, "vacuum", 1.0)
     abstract_state2 = state_abstractor(state2)
     assert Holding([robot, obstruction0]) in abstract_state2.atoms
+    # Create state where the target block is on the target surface.
+    target_surface = obj_name_to_obj["target_surface"]
+    state3 = state.copy()
+    state3.set(target_block, "x", state3.get(target_surface, "x"))
+    abstract_state3 = state_abstractor(state3)
+    assert OnTarget([target_block]) in abstract_state3.atoms
+
 
 
 
