@@ -9,6 +9,18 @@ from prbench_bilevel_planning.agent import BilevelPlanningAgent
 prbench.register_all_environments()
 
 
+def test_obstruction_2d_observation_to_state():
+    """Tests for observation_to_state() in the Obstruction2D environment."""
+    env = prbench.make("prbench/Obstruction2D-o1-v0")
+    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
+                                                num_obstructions=1)
+    observation_to_state = env_models.observation_to_state
+    obs, _ = env.reset()
+    state = observation_to_state(obs)
+    assert isinstance(hash(state), int)  # states are hashable for bilevel planning
+    
+
+
 @pytest.mark.parametrize("num_obstructions", [0])  # TODO[0, 1, 2]
 def test_obstruction_2d_bilevel_planning(num_obstructions):
     """Tests for bilevel planning in the Obstruction2D environment.
