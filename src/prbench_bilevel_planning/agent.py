@@ -35,7 +35,7 @@ class BilevelPlanningAgent(Agent[_O, _U]):
         env_models: BilevelPlanningEnvModels,
         seed: int,
         max_abstract_plans: int = 1,  # TODO
-        samples_per_step: int = 2,  # TODO
+        samples_per_step: int = 1,  # TODO
         max_skill_horizon: int = 100,
         heuristic_name: str = "hff",
         planning_timeout: float = 30.0,

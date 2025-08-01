@@ -430,7 +430,7 @@ def get_robot_transfer_position(
     robot = state.get_objects(CRVRobotType)[0]
     surface = state.get_objects(TargetSurfaceType)[0]
     ground = state.get(surface, "y") + state.get(surface, "height")
-    padding = 1e-6
+    padding = 1e-4
     x = block_x + relative_x_offset
     y = (
         ground
