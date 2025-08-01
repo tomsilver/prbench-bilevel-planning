@@ -14,8 +14,12 @@ from bilevel_planning.structs import (
 from geom2drobotenvs.concepts import is_on
 from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
 from geom2drobotenvs.object_types import CRVRobotType, RectangleType
-from geom2drobotenvs.utils import CRVRobotActionSpace, get_suctioned_objects
-from gymnasium.spaces import Space
+from geom2drobotenvs.utils import (
+    CRVRobotActionSpace,
+    MultiBody2D,
+    get_suctioned_objects,
+)
+from gymnasium.spaces import Box, Space
 from numpy.typing import NDArray
 from prbench.envs.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
 from prpl_utils.spaces import FunctionalSpace
@@ -26,6 +30,7 @@ from relational_structs import (
     Object,
     ObjectCentricState,
     Predicate,
+    Variable,
 )
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
 
@@ -92,7 +97,9 @@ def create_bilevel_planning_models(
     state_space = ObjectCentricStateSpace(types)
 
     # Create the action space.
-    action_space = FunctionalSpace(contains_fn=lambda x: isinstance(x, tuple))  # weak
+    action_space: Space = FunctionalSpace(
+        contains_fn=lambda x: isinstance(x, tuple)
+    )  # weak
 
     # Predicates.
     Holding = Predicate("Holding", [CRVRobotType, RectangleType])
@@ -102,16 +109,16 @@ def create_bilevel_planning_models(
     predicates = {Holding, HandEmpty, OnTable, OnTarget}
 
     # State abstractor.
-    static_state_cache = {}  # being extra safe for now
+    static_state_cache: dict[Object, MultiBody2D] = {}  # being extra safe for now
 
-    def state_abstractor(x: ObjectCentricState) -> set[GroundAtom]:
+    def state_abstractor(x: ObjectCentricState) -> RelationalAbstractState:
         """Get the abstract state for the current state."""
-        robot = CRVRobotType("robot")
-        target = TargetBlockType("target_block")
-        target_surface = TargetSurfaceType("target_surface")
+        robot = Object("robot", CRVRobotType)
+        target = Object("target_block", TargetBlockType)
+        target_surface = Object("target_surface", TargetSurfaceType)
         obstructions: set[Object] = set()
         for i in range(num_obstructions):
-            obstruction = RectangleType(f"obstruction{i}")
+            obstruction = Object(f"obstruction{i}", RectangleType)
             obstructions.add(obstruction)
         atoms: set[GroundAtom] = set()
         # Add holding / handempty atoms.
@@ -130,16 +137,16 @@ def create_bilevel_planning_models(
         return RelationalAbstractState(atoms, objects)
 
     # Goal abstractor.
-    def goal_deriver(x: ObjectCentricState) -> set[GroundAtom]:
+    def goal_deriver(x: ObjectCentricState) -> RelationalAbstractGoal:
         """The goal is always the same in this environment."""
         del x  # not needed
-        target = TargetBlockType("target_block")
+        target = Object("target_block", TargetBlockType)
         atoms = {GroundAtom(OnTarget, [target])}
         return RelationalAbstractGoal(atoms, state_abstractor)
 
     # Operators.
-    robot = CRVRobotType("?robot")
-    block = RectangleType("?block")
+    robot = Variable("?robot", CRVRobotType)
+    block = Variable("?block", RectangleType)
     PickFromTableOperator = LiftedOperator(
         "PickFromTable",
         [robot, block],
@@ -186,7 +193,7 @@ def create_bilevel_planning_models(
             self._block = block
             super().__init__(objects)
             self._current_params: float = 0.0  # different meanings for subclasses
-            self._current_plan: list[NDArray[np.float32]] | None = None
+            self._current_plan: list[tuple[float, ...]] | None = None
             self._current_state: ObjectCentricState | None = None
             self._safe_y = safe_y
             self._max_delta = max_delta
@@ -206,10 +213,10 @@ def create_bilevel_planning_models(
             state: ObjectCentricState,
             waypoints: list[tuple[float, float]],
             vacuum_during_plan: float,
-        ) -> list[NDArray[np.float32]]:
+        ) -> list[tuple[float, ...]]:
             current_pos = (state.get(self._robot, "x"), state.get(self._robot, "y"))
             waypoints = [current_pos] + waypoints
-            plan: list[NDArray[np.float32]] = []
+            plan: list[tuple[float, ...]] = []
             for start, end in zip(waypoints[:-1], waypoints[1:]):
                 if np.allclose(start, end):
                     continue
@@ -237,10 +244,11 @@ def create_bilevel_planning_models(
         def terminated(self) -> bool:
             return self._current_plan is not None and len(self._current_plan) == 0
 
-        def step(self) -> NDArray[np.float32]:
+        def step(self) -> tuple[float, ...]:
             # Always extend the arm first before planning.
             assert self._current_state is not None
             if self._current_state.get(self._robot, "arm_joint") <= 0.15:
+                assert isinstance(executable_space, Box)
                 return (0, 0, 0, executable_space.high[3], 0)
             if self._current_plan is None:
                 self._current_plan = self._generate_plan(self._current_state)
@@ -253,7 +261,8 @@ def create_bilevel_planning_models(
             waypoints = self._generate_waypoints(x)
             vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
             waypoint_plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
-            plan_suffix = [
+            assert isinstance(executable_space, Box)
+            plan_suffix: list[tuple[float, ...]] = [
                 # Change the vacuum.
                 (0, 0, 0, 0, vacuum_after_plan),
                 # Move up slightly to break contact.
@@ -370,19 +379,23 @@ def create_bilevel_planning_models(
             assert radius >= 0
             return rng.uniform(center_x - radius, center_x + radius)
 
-    PickController = LiftedParameterizedController(
+    PickController: LiftedParameterizedController = LiftedParameterizedController(
         [robot, block],
         GroundPickController,
     )
 
-    PlaceOnTableController = LiftedParameterizedController(
-        [robot, block],
-        GroundPlaceOnTableController,
+    PlaceOnTableController: LiftedParameterizedController = (
+        LiftedParameterizedController(
+            [robot, block],
+            GroundPlaceOnTableController,
+        )
     )
 
-    PlaceOnTargetController = LiftedParameterizedController(
-        [robot, block],
-        GroundPlaceOnTargetController,
+    PlaceOnTargetController: LiftedParameterizedController = (
+        LiftedParameterizedController(
+            [robot, block],
+            GroundPlaceOnTargetController,
+        )
     )
 
     # Finalize the skills.

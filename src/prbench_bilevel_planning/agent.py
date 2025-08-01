@@ -2,6 +2,9 @@
 
 from typing import Hashable, TypeVar
 
+from bilevel_planning.abstract_plan_generators.abstract_plan_generator import (
+    AbstractPlanGenerator,
+)
 from bilevel_planning.abstract_plan_generators.heuristic_search_plan_generator import (
     RelationalHeuristicSearchAbstractPlanGenerator,
 )
@@ -74,12 +77,14 @@ class BilevelPlanningAgent(Agent[_O, _U]):
         )
 
         # Create the abstract plan generator.
-        abstract_plan_generator = RelationalHeuristicSearchAbstractPlanGenerator(
-            self._env_models.types,
-            self._env_models.predicates,
-            self._env_models.operators,
-            self._heuristic_name,
-            seed=self._seed,
+        abstract_plan_generator: AbstractPlanGenerator = (
+            RelationalHeuristicSearchAbstractPlanGenerator(
+                self._env_models.types,
+                self._env_models.predicates,
+                self._env_models.operators,
+                self._heuristic_name,
+                seed=self._seed,
+            )
         )
 
         # Create the abstract successor function (not really used).
