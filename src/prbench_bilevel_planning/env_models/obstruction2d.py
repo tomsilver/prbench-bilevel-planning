@@ -16,7 +16,6 @@ from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfa
 from geom2drobotenvs.object_types import CRVRobotType, RectangleType
 from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
-    MultiBody2D,
     get_suctioned_objects,
 )
 from gymnasium.spaces import Box, Space
@@ -109,8 +108,6 @@ def create_bilevel_planning_models(
     predicates = {Holding, HandEmpty, OnTable, OnTarget}
 
     # State abstractor.
-    static_state_cache: dict[Object, MultiBody2D] = {}  # being extra safe for now
-
     def state_abstractor(x: ObjectCentricState) -> RelationalAbstractState:
         """Get the abstract state for the current state."""
         robot = Object("robot", CRVRobotType)
@@ -129,7 +126,7 @@ def create_bilevel_planning_models(
             atoms.add(GroundAtom(HandEmpty, [robot]))
         # Add "on" atoms.
         for block in obstructions | {target}:
-            if is_on(x, block, target_surface, static_state_cache):
+            if is_on(x, block, target_surface, {}):
                 atoms.add(GroundAtom(OnTarget, [block]))
             elif block not in suctioned_objs:
                 atoms.add(GroundAtom(OnTable, [block]))

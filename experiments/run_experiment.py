@@ -73,7 +73,8 @@ def _run_single_episode_evaluation(
 ) -> dict[str, float]:
     steps = 0
     success = False
-    obs, info = env.reset(seed=sample_seed_from_rng(rng))
+    seed = sample_seed_from_rng(rng)
+    obs, info = env.reset(seed=seed)
     planning_time = 0.0  # measure the time taken by the approach only
     with timer() as result:
         agent.reset(obs, info)
