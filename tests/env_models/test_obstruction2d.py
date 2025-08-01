@@ -87,7 +87,8 @@ def test_obstruction2d_state_abstractor():
     HandEmpty = pred_name_to_pred["HandEmpty"]
     OnTable = pred_name_to_pred["OnTable"]
     OnTarget = pred_name_to_pred["OnTarget"]
-    obs, _ = env.reset(seed=123)
+    env.reset(seed=123)
+    obs, _, _, _, _ = env.step((0, 0, 0, 0.1, 0.0))  # extend the arm
     state = env_models.observation_to_state(obs)
     abstract_state = state_abstractor(state)
     obj_name_to_obj = {o.name: o for o in abstract_state.objects}
@@ -108,6 +109,14 @@ def test_obstruction2d_state_abstractor():
     state1.set(robot, "vacuum", 1.0)
     abstract_state1 = state_abstractor(state1)
     assert Holding([robot, target_block]) in abstract_state1.atoms
+
+    # Uncomment to debug.
+    # import imageio.v2 as iio
+    # env.unwrapped._geom2d_env._current_state = state1
+    # img = env.render()
+    # iio.imsave(f"debug/robot-holding-block.png", img)
+    # import ipdb; ipdb.set_trace()
+
     # Create state where robot is holding the obstruction.
     obstruction_x = state.get(obstruction0, "x")
     robot_x, robot_y = get_robot_transfer_position(obstruction0, state, obstruction_x, robot_arm_joint)
@@ -144,8 +153,6 @@ def _skill_test_helper(ground_skill, env_models, env, current_obs,
         obs, _, _, _, _ = env.step(executable)
         state = env_models.observation_to_state(obs)
         controller.observe(state)
-        if controller.terminated():
-            break
 
         # Uncomment to debug.
         import imageio.v2 as iio
@@ -153,6 +160,8 @@ def _skill_test_helper(ground_skill, env_models, env, current_obs,
         img = env.render()
         iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
 
+        if controller.terminated():
+            break
     else:
         assert False, "Controller did not terminate"
     next_abstract_state = env_models.state_abstractor(state)
