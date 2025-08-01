@@ -108,7 +108,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
                 atoms.add(GroundAtom(OnTarget, [block]))
             elif block not in suctioned_objs:
                 atoms.add(GroundAtom(OnTable, [block]))
-        objects = {robot, target} | obstructions
+        objects = {robot, target, target_surface} | obstructions
         return RelationalAbstractState(atoms, objects)
     
     # Goal abstractor.
