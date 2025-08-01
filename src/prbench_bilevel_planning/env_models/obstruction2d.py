@@ -1,6 +1,7 @@
 """Bilevel planning models for the obstruction 2D environment."""
 
 from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
+from prbench.envs.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
 from gymnasium.spaces import Space
 from prpl_utils.spaces import FunctionalSpace
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
@@ -23,10 +24,11 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
     assert isinstance(observation_space, ObjectCentricBoxSpace)
     assert isinstance(executable_space, CRVRobotActionSpace)
 
-    # Make a local copy of the environment to use as the "simulator".
-    sim = prbench.make(f"prbench/Obstruction2D-o{num_obstructions}-v0")
-    assert sim.observation_space == observation_space
-    assert sim.action_space == executable_space
+    # Make a local copy of the environment to use as the "simulator". Note that we use
+    # the object-centric version of the environment because we want access to the reset
+    # and step functions in there, which operate over ObjectCentricState, which we use
+    # as the state representation for planning.
+    sim = ObjectCentricObstruction2DEnv(num_obstructions=1)
     
     # Convert observations into states. The important thing is that states are hashable.
     def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
@@ -38,23 +40,33 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         """Convert actions into executables."""
         return np.array(action, dtype=np.float32)
     
+    # The object-centric states that are passed around in planning do not include the
+    # globally constant objects, so we need to create an exemplar state that does
+    # include them and then copy in the changing values before calling step().
+    exemplar_state = sim.reset()[0]
+    
     # Create the transition function.
     def transition_fn(x: ObjectCentricState, u: tuple[float, ...]) -> ObjectCentricState:
         """Simulate the action."""
-        # NOTE: static objects are not being simulated at all right now. This will
-        # break in other environments. Need to revisit.
-        sim.reset(options={"init_state": x})
-
-        obs, _, _, _, _ = sim.step(action_to_executable(u))
-
+        # See note above re: why we can't just sim.reset(options={"init_state": x}).
+        state = exemplar_state.copy()
+        for obj, feats in x.data.items():
+            state.data[obj] = feats
+        # Now we can reset().
+        sim.reset(options={"init_state": state})
+        sim_obs, _, _, _, _ = sim.step(action_to_executable(u))
+        
         # Uncomment to debug.
         # import imageio.v2 as iio
         # import time
         # img = sim.render()
         # iio.imsave(f"debug/debug-sim-{int(time.time()*1000.0)}.png", img)
-        # print(u)
-
-        return observation_to_state(obs)
+        
+        # Now we need to extract back out the changing objects.
+        next_x = x.copy()
+        for obj in x:
+            next_x.data[obj] = sim_obs.data[obj]
+        return next_x
     
     # Types.
     types = {CRVRobotType, RectangleType, TargetBlockType, TargetSurfaceType}
