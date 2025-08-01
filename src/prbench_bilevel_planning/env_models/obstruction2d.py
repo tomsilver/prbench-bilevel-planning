@@ -361,4 +361,5 @@ def get_robot_transfer_position(block: Object, state: ObjectCentricState,
     padding = 1e-6
     x = block_x + relative_x_offset
     y = ground + state.get(block, "height") + robot_arm_joint + state.get(robot, "gripper_width") + padding
+    import ipdb; ipdb.set_trace()
     return (x, y)
