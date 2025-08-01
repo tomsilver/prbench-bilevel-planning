@@ -215,7 +215,11 @@ def test_obstruction2d_skills():
     target_x = state0.get(target_block, "x")
     target_y = state0.get(target_block, "y")
     obs2 = _skill_test_helper(
-        place_target_block_on_table, env_models, env, obs1, params=state1.get(robot, "x")
+        place_target_block_on_table,
+        env_models,
+        env,
+        obs1,
+        params=state1.get(robot, "x"),
     )
     state2 = env_models.observation_to_state(obs2)
     actual_x = state2.get(target_block, "x")
@@ -230,12 +234,16 @@ def test_obstruction2d_skills():
     _skill_test_helper(pick_target_block_from_target, env_models, env, obs4)
 
 
-@pytest.mark.parametrize("num_obstructions, max_abstract_plans, samples_per_step",
-                         [
-                            #  (0, 1, 1),
-                          (1, 10, 1)
-                        ])
-def test_obstruction2d_bilevel_planning(num_obstructions, max_abstract_plans, samples_per_step):
+@pytest.mark.parametrize(
+    "num_obstructions, max_abstract_plans, samples_per_step",
+    [
+        (0, 1, 1),
+        (1, 10, 1),
+    ],
+)
+def test_obstruction2d_bilevel_planning(
+    num_obstructions, max_abstract_plans, samples_per_step
+):
     """Tests for bilevel planning in the Obstruction2D environment.
 
     Note that we only test a small number of obstructions to keep tests fast. Use
@@ -255,7 +263,12 @@ def test_obstruction2d_bilevel_planning(num_obstructions, max_abstract_plans, sa
         env.action_space,
         num_obstructions=num_obstructions,
     )
-    agent = BilevelPlanningAgent(env_models, seed=123, max_abstract_plans=max_abstract_plans, samples_per_step=samples_per_step)
+    agent = BilevelPlanningAgent(
+        env_models,
+        seed=123,
+        max_abstract_plans=max_abstract_plans,
+        samples_per_step=samples_per_step,
+    )
 
     obs, info = env.reset(seed=123)
 
