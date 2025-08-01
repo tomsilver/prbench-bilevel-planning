@@ -28,7 +28,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
     # the object-centric version of the environment because we want access to the reset
     # and step functions in there, which operate over ObjectCentricState, which we use
     # as the state representation for planning.
-    sim = ObjectCentricObstruction2DEnv(num_obstructions=1)
+    sim = ObjectCentricObstruction2DEnv(num_obstructions=num_obstructions)
     
     # Convert observations into states. The important thing is that states are hashable.
     def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
