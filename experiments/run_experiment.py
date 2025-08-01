@@ -5,16 +5,16 @@ TODO: add example command.
 
 import logging
 
-import prbench
 import hydra
 import numpy as np
 import pandas as pd
+import prbench
 from gymnasium.core import Env
 from omegaconf import DictConfig
-from prpl_utils.utils import sample_seed_from_rng
+from prpl_utils.utils import sample_seed_from_rng, timer
+
 from prbench_bilevel_planning.agent import BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
-from prpl_utils.utils import timer
 
 
 @hydra.main(version_base=None, config_name="config", config_path="conf/")
@@ -26,13 +26,17 @@ def _main(cfg: DictConfig) -> None:
     env = prbench.make(**cfg.env.make_kwargs)
 
     # Create the env models.
-    env_models = create_bilevel_planning_models(cfg.env_name,
-                                                env.observation_space,
-                                                env.action_space,
-                                                **cfg.env.env_model_kwargs)
+    env_models = create_bilevel_planning_models(
+        cfg.env_name,
+        env.observation_space,
+        env.action_space,
+        **cfg.env.env_model_kwargs,
+    )
 
     # Create the agent.
-    agent = BilevelPlanningAgent(env_models, cfg.seed, **cfg.approach.agent_kwargs)
+    agent: BilevelPlanningAgent = BilevelPlanningAgent(
+        env_models, cfg.seed, **cfg.approach.agent_kwargs
+    )
 
     # Evaluate.
     rng = np.random.default_rng(cfg.seed)
