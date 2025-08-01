@@ -167,14 +167,16 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None):
         action = controller.step()
         executable = env_models.action_to_executable(action)
         obs, _, _, _, _ = env.step(executable)
-        state = env_models.observation_to_state(obs)
-        controller.observe(state)
+        next_state = env_models.observation_to_state(obs)
+        controller.observe(next_state)
+        assert env_models.transition_fn(state, action) == next_state
+        state = next_state
 
         # Uncomment to debug.
-        import imageio.v2 as iio
-        import time
-        img = env.render()
-        iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
+        # import imageio.v2 as iio
+        # import time
+        # img = env.render()
+        # iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
 
         if controller.terminated():
             break
