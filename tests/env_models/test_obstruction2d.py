@@ -74,6 +74,28 @@ def test_goal_deriver():
     assert str(goal_atom) == "(OnTarget target_block)"
 
 
+def test_state_abstractor():
+    """Tests for state_abstractor()in the Obstruction2D environment."""
+    env = prbench.make("prbench/Obstruction2D-o1-v0")
+    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
+                                                num_obstructions=1)
+    state_abstractor = env_models.state_abstractor
+    pred_name_to_pred = {p.name: p for p in env_models.predicates}
+    Holding = pred_name_to_pred["Holding"]
+    HandEmpty = pred_name_to_pred["HandEmpty"]
+    OnTable = pred_name_to_pred["OnTable"]
+    OnTarget = pred_name_to_pred["OnTarget"]
+    obs, _ = env.reset(seed=123)
+    state = env_models.observation_to_state(obs)
+    abstract_state = state_abstractor(state)
+    obj_name_to_obj = {o.name: o for o in abstract_state.objects}
+    robot = obj_name_to_obj["robot"]
+    target_block = obj_name_to_obj["target_block"]
+    obstruction0 = obj_name_to_obj["obstruction0"]
+    assert len(abstract_state.atoms) == 3
+    assert HandEmpty([robot]) in abstract_state.atoms
+    assert OnTable([target_block]) in abstract_state.atoms
+    assert OnTable([obstruction0]) in abstract_state.atoms or OnTarget([obstruction0]) in abstract_state.atoms
 
 
 @pytest.mark.parametrize("num_obstructions", [0])  # TODO[0, 1, 2]
