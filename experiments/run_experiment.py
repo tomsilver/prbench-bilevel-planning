@@ -20,14 +20,14 @@ from prbench_bilevel_planning.env_models import create_bilevel_planning_models
 @hydra.main(version_base=None, config_name="config", config_path="conf/")
 def _main(cfg: DictConfig) -> None:
 
-    logging.info(f"Running seed={cfg.seed}, env={cfg.env_name}")
+    logging.info(f"Running seed={cfg.seed}, env={cfg.env.env_name}")
 
     # Create the environment.
     env = prbench.make(**cfg.env.make_kwargs)
 
     # Create the env models.
     env_models = create_bilevel_planning_models(
-        cfg.env_name,
+        cfg.env.env_name,
         env.observation_space,
         env.action_space,
         **cfg.env.env_model_kwargs,
@@ -35,7 +35,13 @@ def _main(cfg: DictConfig) -> None:
 
     # Create the agent.
     agent: BilevelPlanningAgent = BilevelPlanningAgent(
-        env_models, cfg.seed, **cfg.approach.agent_kwargs
+        env_models,
+        cfg.seed,
+        max_abstract_plans=cfg.max_abstract_plans,
+        samples_per_step=cfg.samples_per_step,
+        max_skill_horizon=cfg.max_skill_horizon,
+        heuristic_name=cfg.heuristic_name,
+        planning_timeout=cfg.planning_timeout,
     )
 
     # Evaluate.
