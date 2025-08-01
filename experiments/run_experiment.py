@@ -1,7 +1,15 @@
 """Main entry point for running experiments.
 
-Example:
+Examples:
     python experiments/run_experiment.py env=obstruction2d-o0 seed=0
+
+    python experiments/run_experiment.py -m env=obstruction2d-o0 seed='range(0,10)'
+
+    python experiments/run_experiment.py -m env=obstruction2d-o0 seed=0 \
+        samples_per_step=1,5,10
+
+    python experiments/run_experiment.py -m env=obstruction2d-o0 seed=0 \
+        max_abstract_plans=1,5,10
 """
 
 import logging
