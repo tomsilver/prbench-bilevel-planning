@@ -1,0 +1,87 @@
+"""Main entry point for running experiments.
+
+TODO: add example command.
+"""
+
+import logging
+
+import prbench
+import hydra
+import numpy as np
+import pandas as pd
+from gymnasium.core import Env
+from omegaconf import DictConfig
+from prpl_utils.utils import sample_seed_from_rng
+from prbench_bilevel_planning.agent import BilevelPlanningAgent
+from prbench_bilevel_planning.env_models import create_bilevel_planning_models
+from prpl_utils.utils import timer
+
+
+@hydra.main(version_base=None, config_name="config", config_path="conf/")
+def _main(cfg: DictConfig) -> None:
+
+    logging.info(f"Running seed={cfg.seed}, env={cfg.env_name}")
+
+    # Create the environment.
+    env = prbench.make(**cfg.env.make_kwargs)
+
+    # Create the env models.
+    env_models = create_bilevel_planning_models(cfg.env_name,
+                                                env.observation_space,
+                                                env.action_space,
+                                                **cfg.env.env_model_kwargs)
+
+    # Create the agent.
+    agent = BilevelPlanningAgent(env_models, cfg.seed, **cfg.approach.agent_kwargs)
+
+    # Evaluate.
+    rng = np.random.default_rng(cfg.seed)
+    metrics: list[dict[str, float]] = []
+    for eval_episode in range(cfg.num_eval_episodes):
+        episode_metrics = _run_single_episode_evaluation(
+            agent,
+            env,
+            rng,
+            max_eval_steps=cfg.max_eval_steps,
+        )
+        episode_metrics["eval_episode"] = eval_episode
+        metrics.append(episode_metrics)
+
+    # Aggregate and save results.
+    df = pd.DataFrame(metrics)
+    print(df)
+
+
+def _run_single_episode_evaluation(
+    agent: BilevelPlanningAgent,
+    env: Env,
+    rng: np.random.Generator,
+    max_eval_steps: int,
+) -> dict[str, float]:
+    # For now, just record total rewards and steps.
+    steps = 0
+    success = False
+    obs, info = env.reset(seed=sample_seed_from_rng(rng))
+    planning_time = 0.0  # measure the time taken by the approach only
+    with timer() as result:
+        agent.reset(obs, info)
+    planning_time += result["time"]
+    for _ in range(max_eval_steps):
+        with timer() as result:
+            action = agent.step()
+        planning_time += result["time"]
+        obs, rew, done, truncated, info = env.step(action)
+        reward = float(rew)
+        assert not truncated
+        with timer() as result:
+            agent.update(obs, reward, done, info)
+        planning_time += result["time"]
+        if done:
+            success = True
+            break
+        steps += 1
+    return {"success": success, "steps": steps, "planning_time": planning_time}
+
+
+if __name__ == "__main__":
+    _main()  # pylint: disable=no-value-for-parameter

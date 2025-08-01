@@ -11,6 +11,10 @@ requires-python = ">=3.11"
 dependencies = [
    "matplotlib",
    "numpy",
+   "pandas",
+   "pandas-stubs",
+   "hydra-core",
+   "omegaconf",
 ]
 
 [project.optional-dependencies]
