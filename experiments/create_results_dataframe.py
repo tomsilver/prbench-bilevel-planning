@@ -4,10 +4,9 @@ Examples:
   python experiments/create_results_dataframe.py --results_dir logs/2025-08-01/14-36-09
 
   python experiments/create_results_dataframe.py \
-    --results_dir logs/2025-08-01/14-36-09 \
-    --mean max_abstract_plans samples_per_step seed eval_episode \
-    --config_columns env.env_name seed max_abstract_plans samples_per_step \
-                     env.make_kwargs.id
+    --config_columns env.env_name env.make_kwargs.id seed max_abstract_plans \
+        samples_per_step \
+    --results_dir logs/2025-08-01/14-36-09
 """
 
 import argparse
@@ -22,13 +21,9 @@ def _main(
     results_dir: Path,
     columns: list[str],
     config_columns: list[str],
-    mean_agg_columns: list[str],
-    hide_columns: list[str],
     output_file: Path | None = None,
 ) -> None:
 
-    # Can only aggregate over columns that exist.
-    assert set(mean_agg_columns).issubset(set(columns) | set(config_columns))
     assert not set(columns) & set(config_columns)  # danger!
 
     # Load the configs and results from the subdirectories.
@@ -64,9 +59,9 @@ def _main(
 
     # Aggregate.
     # I hate pandas, why isn't this easy...
-    groupby_cols = sorted(set(combined_df.columns) - set(mean_agg_columns))
-    keep_cols = sorted(set(combined_df.columns) - set(hide_columns))
-    aggregated_df = combined_df.groupby(groupby_cols).mean().reset_index()[keep_cols]
+    group_cols = sorted(set(config_columns) - {"seed"})
+    keep_cols = [c for c in combined_df.columns if c not in ["seed", "eval_episode"]]
+    aggregated_df = combined_df.groupby(group_cols).mean().reset_index()[keep_cols]
 
     # Write output or print.
     if output_file is not None:
@@ -102,20 +97,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--mean_agg_columns",
-        nargs="*",
-        default=["seed", "eval_episode"],
-        help="Columns to aggregate over using mean (default: seed, eval_episode)",
-    )
-
-    parser.add_argument(
-        "--hide_columns",
-        nargs="*",
-        default=["seed", "eval_episode"],
-        help="Columns to hide after aggregation (default: seed, eval_episode)",
-    )
-
-    parser.add_argument(
         "--output_file",
         type=Path,
         help="Output CSV file path (if not specified, prints to stdout)",
@@ -126,7 +107,5 @@ if __name__ == "__main__":
         args.results_dir,
         args.columns,
         args.config_columns,
-        args.mean_agg_columns,
-        args.hide_columns,
         args.output_file,
     )
