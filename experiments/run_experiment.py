@@ -1,6 +1,7 @@
 """Main entry point for running experiments.
 
-TODO: add example command.
+Example:
+    python experiments/run_experiment.py env=obstruction2d-o0 seed=0
 """
 
 import logging
@@ -23,6 +24,7 @@ def _main(cfg: DictConfig) -> None:
     logging.info(f"Running seed={cfg.seed}, env={cfg.env.env_name}")
 
     # Create the environment.
+    prbench.register_all_environments()
     env = prbench.make(**cfg.env.make_kwargs)
 
     # Create the env models.
@@ -48,6 +50,7 @@ def _main(cfg: DictConfig) -> None:
     rng = np.random.default_rng(cfg.seed)
     metrics: list[dict[str, float]] = []
     for eval_episode in range(cfg.num_eval_episodes):
+        logging.info(f"Starting evaluation episode {eval_episode}")
         episode_metrics = _run_single_episode_evaluation(
             agent,
             env,
@@ -68,7 +71,6 @@ def _run_single_episode_evaluation(
     rng: np.random.Generator,
     max_eval_steps: int,
 ) -> dict[str, float]:
-    # For now, just record total rewards and steps.
     steps = 0
     success = False
     obs, info = env.reset(seed=sample_seed_from_rng(rng))
@@ -90,6 +92,7 @@ def _run_single_episode_evaluation(
             success = True
             break
         steps += 1
+    logging.info(f"Success result: {success}")
     return {"success": success, "steps": steps, "planning_time": planning_time}
 
 

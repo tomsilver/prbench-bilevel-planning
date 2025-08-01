@@ -1,6 +1,6 @@
 """A general interface for an agent that runs bilevel planning."""
 
-from typing import Hashable, TypeVar
+from typing import Any, Hashable, TypeVar
 
 from bilevel_planning.abstract_plan_generators.abstract_plan_generator import (
     AbstractPlanGenerator,
@@ -50,9 +50,15 @@ class BilevelPlanningAgent(Agent[_O, _U]):
         self._seed = seed
         super().__init__(seed)
 
+    def reset(
+        self,
+        obs: _O,
+        info: dict[str, Any],
+    ) -> None:
+        super().reset(obs, info)
+        self._current_plan = self._run_planning()
+
     def _get_action(self) -> _U:
-        if self._current_plan is None:
-            self._current_plan = self._run_planning()
         assert self._current_plan, "Ran out of planning steps, failure!"
         return self._current_plan.pop(0)
 
