@@ -2,20 +2,31 @@
 
 Examples:
   python experiments/create_results_dataframe.py --results_dir logs/2025-08-01/14-36-09
+
+  python experiments/create_results_dataframe.py \
+    --results_dir logs/2025-08-01/14-36-09 \
+    --mean max_abstract_plans samples_per_step seed eval_episode \
+    --config_columns env.env_name seed max_abstract_plans samples_per_step \
+                     env.make_kwargs.id
 """
 
 import argparse
 from pathlib import Path
-from omegaconf import DictConfig, OmegaConf
 from typing import Any
 
-
 import pandas as pd
+from omegaconf import DictConfig, OmegaConf
 
 
-def _main(results_dir: Path, columns: list[str], config_columns: list[str], mean_agg_columns: list[str],
-          output_file: Path | None = None) -> None:
-    
+def _main(
+    results_dir: Path,
+    columns: list[str],
+    config_columns: list[str],
+    mean_agg_columns: list[str],
+    hide_columns: list[str],
+    output_file: Path | None = None,
+) -> None:
+
     # Can only aggregate over columns that exist.
     assert set(mean_agg_columns).issubset(set(columns) | set(config_columns))
     assert not set(columns) & set(config_columns)  # danger!
@@ -30,7 +41,8 @@ def _main(results_dir: Path, columns: list[str], config_columns: list[str], mean
         if not results_file.exists() or not config_file.exists():
             continue
         results = pd.read_csv(results_file)
-        config: DictConfig = OmegaConf.load(config_file)
+        config = OmegaConf.load(config_file)
+        assert isinstance(config, DictConfig)
         results_with_configs.append((results, config))
 
     # Combine everything into one dataframe.
@@ -49,49 +61,72 @@ def _main(results_dir: Path, columns: list[str], config_columns: list[str], mean
 
     # Combine into a larger dataframe.
     combined_df = pd.DataFrame(combined_data)
-    print(combined_df)
-    
+
+    # Aggregate.
+    # I hate pandas, why isn't this easy...
+    groupby_cols = sorted(set(combined_df.columns) - set(mean_agg_columns))
+    keep_cols = sorted(set(combined_df.columns) - set(hide_columns))
+    aggregated_df = combined_df.groupby(groupby_cols).mean().reset_index()[keep_cols]
+
+    # Write output or print.
+    if output_file is not None:
+        aggregated_df.to_csv(output_file)
+    else:
+        print(aggregated_df.to_string())
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Create aggregated DataFrame from experiment results",
     )
-    
+
     parser.add_argument(
         "--results_dir",
         type=Path,
         required=True,
-        help="Directory containing experiment results"
+        help="Directory containing experiment results",
     )
-    
+
     parser.add_argument(
         "--columns",
         nargs="*",
         default=["success", "steps", "planning_time", "eval_episode"],
-        help="Specific metric columns to include (default: success, steps, planning_time)"
+        help="Specific metric columns to include",
     )
-    
+
     parser.add_argument(
         "--config_columns",
         nargs="*",
         default=["env.env_name", "seed", "max_abstract_plans", "samples_per_step"],
-        help="Specific config columns to include (default: env)."
+        help="Specific config columns to include (default: env).",
     )
-    
+
     parser.add_argument(
         "--mean_agg_columns",
         nargs="*",
         default=["seed", "eval_episode"],
-        help="Columns to aggregate over using mean (default: seed, eval_episode)"
+        help="Columns to aggregate over using mean (default: seed, eval_episode)",
     )
-    
+
+    parser.add_argument(
+        "--hide_columns",
+        nargs="*",
+        default=["seed", "eval_episode"],
+        help="Columns to hide after aggregation (default: seed, eval_episode)",
+    )
+
     parser.add_argument(
         "--output_file",
         type=Path,
-        help="Output CSV file path (if not specified, prints to stdout)"
+        help="Output CSV file path (if not specified, prints to stdout)",
     )
-    
+
     args = parser.parse_args()
-    _main(args.results_dir, args.columns, args.config_columns, args.mean_agg_columns,
-          args.output_file)
+    _main(
+        args.results_dir,
+        args.columns,
+        args.config_columns,
+        args.mean_agg_columns,
+        args.hide_columns,
+        args.output_file,
+    )

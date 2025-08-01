@@ -72,21 +72,20 @@ def _main(cfg: DictConfig) -> None:
 
     # Aggregate and save results.
     df = pd.DataFrame(metrics)
-    
+
     # Save results and config.
     current_dir = HydraConfig.get().runtime.output_dir
-    
+
     # Save the metrics dataframe.
-    results_path = os.path.join(current_dir, 'results.csv')
+    results_path = os.path.join(current_dir, "results.csv")
     df.to_csv(results_path, index=False)
     logging.info(f"Saved results to {results_path}")
-    
+
     # Save the full hydra config.
-    config_path = os.path.join(current_dir, 'config.yaml')
-    with open(config_path, 'w') as f:
+    config_path = os.path.join(current_dir, "config.yaml")
+    with open(config_path, "w", encoding="utf-8") as f:
         OmegaConf.save(cfg, f)
     logging.info(f"Saved config to {config_path}")
-
 
 
 def _run_single_episode_evaluation(
