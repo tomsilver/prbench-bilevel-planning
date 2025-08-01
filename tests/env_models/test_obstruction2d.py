@@ -171,10 +171,10 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None):
         controller.observe(state)
 
         # Uncomment to debug.
-        # import imageio.v2 as iio
-        # import time
-        # img = env.render()
-        # iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
+        import imageio.v2 as iio
+        import time
+        img = env.render()
+        iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
 
         if controller.terminated():
             break
@@ -208,11 +208,12 @@ def test_obstruction2d_skills():
     place_target_block_on_target = PlaceOnTarget.ground((robot, target_block))
     # Test picking the target block from the table.
     obs1 = _skill_test_helper(pick_target_block_from_table, env_models, env, obs0)
+    state1 = env_models.observation_to_state(obs1)
     # Test placing the target block back on the table in the exact same position.
     target_x = state0.get(target_block, "x")
     target_y = state0.get(target_block, "y")
     obs2 = _skill_test_helper(
-        place_target_block_on_table, env_models, env, obs1, params=target_x
+        place_target_block_on_table, env_models, env, obs1, params=state1.get(robot, "x")
     )
     state2 = env_models.observation_to_state(obs2)
     actual_x = state2.get(target_block, "x")

@@ -79,10 +79,10 @@ def create_bilevel_planning_models(
         sim_obs, _, _, _, _ = sim.step(action_to_executable(u))
 
         # Uncomment to debug.
-        # import imageio.v2 as iio
-        # import time
-        # img = sim.render()
-        # iio.imsave(f"debug/debug-sim-{int(time.time()*1000.0)}.png", img)
+        import imageio.v2 as iio
+        import time
+        img = sim.render()
+        iio.imsave(f"debug/debug-sim-{int(time.time()*1000.0)}.png", img)
 
         # Now we need to extract back out the changing objects.
         next_x = x.copy()
@@ -327,16 +327,13 @@ def create_bilevel_planning_models(
             self, state: ObjectCentricState
         ) -> list[tuple[float, float]]:
             robot_x = state.get(self._robot, "x")
-            block_x = state.get(self._block, "x")
             robot_arm_joint = state.get(self._robot, "arm_joint")
             placement_x = self._current_params
-            offset_x = block_x - robot_x  # account for relative grasp
             target_x, target_y = get_robot_transfer_position(
                 self._block,
                 state,
                 placement_x,
                 robot_arm_joint,
-                relative_x_offset=offset_x,
             )
 
             return [
@@ -372,12 +369,11 @@ def create_bilevel_planning_models(
             target_width = x.get(surface, "width")
             block_x = x.get(self._block, "x")
             robot_x = x.get(self._robot, "x")
-            offset_x = block_x - robot_x  # account for relative grasp
-            center_x = target_x + offset_x
+            offset_x = robot_x - block_x  # account for relative grasp
+            lower_x = target_x + offset_x
             block_width = x.get(self._block, "width")
-            radius = (target_width - block_width) / 2
-            assert radius >= 0
-            return rng.uniform(center_x - radius, center_x + radius)
+            upper_x = lower_x + (target_width - block_width)
+            return rng.uniform(lower_x, upper_x)
 
     PickController: LiftedParameterizedController = LiftedParameterizedController(
         [robot, block],
