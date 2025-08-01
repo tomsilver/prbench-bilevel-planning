@@ -255,7 +255,9 @@ def test_obstruction2d_bilevel_planning(
     )
 
     if MAKE_VIDEOS:
-        env = RecordVideo(env, "unit_test_videos", name_prefix="obstruction2d")
+        env = RecordVideo(
+            env, "unit_test_videos", name_prefix=f"Obstruction2D-o{num_obstructions}"
+        )
 
     env_models = create_bilevel_planning_models(
         "obstruction2d",
