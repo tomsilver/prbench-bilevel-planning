@@ -24,7 +24,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 from prpl_utils.utils import sample_seed_from_rng, timer
 
-from prbench_bilevel_planning.agent import BilevelPlanningAgent
+from prbench_bilevel_planning.agent import AgentFailure, BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
 
 
@@ -99,9 +99,16 @@ def _run_single_episode_evaluation(
     seed = sample_seed_from_rng(rng)
     obs, info = env.reset(seed=seed)
     planning_time = 0.0  # measure the time taken by the approach only
+    planning_failed = False
     with timer() as result:
-        agent.reset(obs, info)
+        try:
+            agent.reset(obs, info)
+        except AgentFailure:
+            logging.info("Agent failed to find any plan.")
+            planning_failed = True
     planning_time += result["time"]
+    if planning_failed:
+        return {"success": False, "steps": steps, "planning_time": planning_time}
     for _ in range(max_eval_steps):
         with timer() as result:
             action = agent.step()

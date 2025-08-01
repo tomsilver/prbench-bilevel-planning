@@ -27,6 +27,10 @@ _O = TypeVar("_O", bound=Hashable)
 _U = TypeVar("_U", bound=Hashable)
 
 
+class AgentFailure(BaseException):
+    """Raised when the agent fails to find a plan."""
+
+
 class BilevelPlanningAgent(Agent[_O, _U]):
     """A general interface for an agent that runs bilevel planning."""
 
@@ -111,6 +115,7 @@ class BilevelPlanningAgent(Agent[_O, _U]):
 
         # Run the planner.
         plan, _ = planner.run(problem, timeout=self._planning_timeout)
-        assert plan is not None
+        if plan is None:
+            raise AgentFailure("No plan found")
 
         return plan.actions
