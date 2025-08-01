@@ -29,7 +29,7 @@ class BilevelPlanningEnvModels(Generic[_O, _E, _X, _U]):
     observation_to_state: Callable[[_O], _X]
     action_to_executable: Callable[[_U], _E]
     state_abstractor: Callable[[_X], RelationalAbstractState]
-    goal_abstractor: Callable[[_X], RelationalAbstractGoal]
+    goal_deriver: Callable[[_X], RelationalAbstractGoal]
     skills: set[LiftedSkill]
 
     @property

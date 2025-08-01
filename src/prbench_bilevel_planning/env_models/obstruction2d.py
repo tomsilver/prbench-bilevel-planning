@@ -113,7 +113,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         return RelationalAbstractState(atoms, objects)
     
     # Goal abstractor.
-    def goal_abstractor(x: ObjectCentricState) -> set[GroundAtom]:
+    def goal_deriver(x: ObjectCentricState) -> set[GroundAtom]:
         """The goal is always the same in this environment."""
         del x  # not needed
         target = TargetBlockType("target_block")
@@ -345,6 +345,6 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         observation_to_state,
         action_to_executable,
         state_abstractor,
-        goal_abstractor,
+        goal_deriver,
         skills
     )

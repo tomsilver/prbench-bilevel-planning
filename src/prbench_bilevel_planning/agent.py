@@ -52,7 +52,7 @@ class BilevelPlanningAgent(Agent[_O, _U]):
     def _run_planning(self) -> list[_U]:
         # Create planning problem.
         initial_state = self._env_models.observation_to_state(self._last_observation)
-        goal = self._env_models.goal_abstractor(initial_state)
+        goal = self._env_models.goal_deriver(initial_state)
         problem = PlanningProblem(
             self._env_models.state_space,
             self._env_models.action_space,
