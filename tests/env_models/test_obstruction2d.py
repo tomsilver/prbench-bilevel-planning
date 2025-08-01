@@ -135,7 +135,6 @@ def test_obstruction2d_state_abstractor():
 
 
 def _skill_test_helper(ground_skill, env_models, env, obs,
-                       assert_abstract_state_correct=True,
                        params=None):
     rng = np.random.default_rng(123)
     state = env_models.observation_to_state(obs)
@@ -165,8 +164,7 @@ def _skill_test_helper(ground_skill, env_models, env, obs,
     else:
         assert False, "Controller did not terminate"
     next_abstract_state = env_models.state_abstractor(state)
-    if assert_abstract_state_correct:
-        assert next_abstract_state.atoms == predicted_next_atoms
+    assert next_abstract_state.atoms == predicted_next_atoms
     return obs
 
 
@@ -202,6 +200,12 @@ def test_obstruction2d_skills():
     actual_y = state2.get(target_block, "y")
     assert np.isclose(target_x, actual_x)
     assert np.isclose(target_y, actual_y)
+    # Pick the block again.
+    obs3 = _skill_test_helper(pick_target_block_from_table, env_models, env, obs2)
+    # Place the block in the target.
+    obs4 = _skill_test_helper(place_target_block_on_target, env_models, env, obs3)
+    # Pick the block from the target.
+    _skill_test_helper(pick_target_block_from_target, env_models, env, obs4)
 
 
 
