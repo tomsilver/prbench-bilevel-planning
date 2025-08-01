@@ -192,15 +192,6 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
                 action = (dx, dy, 0, 0, vacuum_during_plan)
                 for _ in range(num_steps):
                     plan.append(action)
-            
-            # TODO remove
-            x, y = current_pos
-            for action in plan:
-                x += action[0]
-                y += action[1]
-            assert np.isclose(x, waypoints[-1][0])
-            assert np.isclose(y, waypoints[-1][1])
-            print("FINAL WAYPOINT: ", waypoints[-1])
 
             return plan
 
@@ -228,8 +219,13 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
             waypoints = self._generate_waypoints(x)
             vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
             waypoint_plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
-            final_action = (0, 0, 0, 0, vacuum_after_plan)
-            return waypoint_plan + [final_action]
+            plan_suffix = [
+                # Change the vacuum.
+                (0, 0, 0, 0, vacuum_after_plan),
+                # Move up slightly to break contact.
+                (0, executable_space.high[1], 0, 0, vacuum_after_plan),
+            ]
+            return waypoint_plan + plan_suffix
         
 
     class GroundPickController(_CommonGroundController):
@@ -316,7 +312,14 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
             surface = x.get_objects(TargetSurfaceType)[0]
             target_x = x.get(surface, "x")
             target_width = x.get(surface, "width")
-            return rng.uniform(target_x - target_width / 2, target_x + target_width / 2)
+            block_x = x.get(self._block, "x")
+            robot_x = x.get(self._robot, "x")
+            offset_x = (block_x - robot_x)  # account for relative grasp
+            center_x = target_x + offset_x
+            block_width = x.get(self._block, "width")
+            radius = (target_width - block_width) / 2
+            assert radius >= 0
+            return rng.uniform(center_x - radius, center_x + radius)
 
 
     PickController = LiftedParameterizedController(
