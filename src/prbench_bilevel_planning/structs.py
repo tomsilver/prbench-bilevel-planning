@@ -1,11 +1,16 @@
 """Common datastructures."""
 
 from dataclasses import dataclass
-from typing import TypeVar, Hashable, Generic, Callable
-from gymnasium.spaces import Space
-from relational_structs import Type, Predicate
-from bilevel_planning.structs import LiftedSkill, RelationalAbstractGoal, RelationalAbstractState, LiftedOperator
+from typing import Callable, Generic, Hashable, TypeVar
 
+from bilevel_planning.structs import (
+    LiftedOperator,
+    LiftedSkill,
+    RelationalAbstractGoal,
+    RelationalAbstractState,
+)
+from gymnasium.spaces import Space
+from relational_structs import Predicate, Type
 
 # These distinctions are primarily necessary because we are assuming in bilevel-planning
 # that states and actions are hashable.

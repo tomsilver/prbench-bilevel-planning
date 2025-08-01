@@ -1,25 +1,40 @@
 """Bilevel planning models for the obstruction 2D environment."""
 
-from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
-from prbench.envs.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
-from gymnasium.spaces import Space
-from prpl_utils.spaces import FunctionalSpace
-from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
-from geom2drobotenvs.utils import CRVRobotActionSpace, get_suctioned_objects
-from geom2drobotenvs.object_types import CRVRobotType, RectangleType
-from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
-from geom2drobotenvs.concepts import is_on
-import numpy as np
-from numpy.typing import NDArray
-from relational_structs import Predicate, GroundAtom, LiftedOperator, LiftedAtom, Object, ObjectCentricState
-from typing import Sequence
-from bilevel_planning.structs import RelationalAbstractState, RelationalAbstractGoal, GroundParameterizedController, LiftedParameterizedController, LiftedSkill
-import prbench
 import abc
+from typing import Sequence
+
+import numpy as np
+from bilevel_planning.structs import (
+    GroundParameterizedController,
+    LiftedParameterizedController,
+    LiftedSkill,
+    RelationalAbstractGoal,
+    RelationalAbstractState,
+)
+from geom2drobotenvs.concepts import is_on
+from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
+from geom2drobotenvs.object_types import CRVRobotType, RectangleType
+from geom2drobotenvs.utils import CRVRobotActionSpace, get_suctioned_objects
+from gymnasium.spaces import Space
+from numpy.typing import NDArray
+from prbench.envs.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
+from prpl_utils.spaces import FunctionalSpace
+from relational_structs import (
+    GroundAtom,
+    LiftedAtom,
+    LiftedOperator,
+    Object,
+    ObjectCentricState,
+    Predicate,
+)
+from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
+
+from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
 
 
-def create_bilevel_planning_models(observation_space: Space, executable_space: Space,
-                                   num_obstructions: int) -> BilevelPlanningEnvModels:
+def create_bilevel_planning_models(
+    observation_space: Space, executable_space: Space, num_obstructions: int
+) -> BilevelPlanningEnvModels:
     """Create the env models for obstruction 2D."""
     assert isinstance(observation_space, ObjectCentricBoxSpace)
     assert isinstance(executable_space, CRVRobotActionSpace)
@@ -29,24 +44,26 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
     # and step functions in there, which operate over ObjectCentricState, which we use
     # as the state representation for planning.
     sim = ObjectCentricObstruction2DEnv(num_obstructions=num_obstructions)
-    
+
     # Convert observations into states. The important thing is that states are hashable.
     def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
         """Convert the vectors back into (hashable) object-centric states."""
         return observation_space.devectorize(o)
-    
+
     # Convert actions into executable actions. Actions must be hashable.
     def action_to_executable(action: tuple[float, ...]) -> NDArray[np.float32]:
         """Convert actions into executables."""
         return np.array(action, dtype=np.float32)
-    
+
     # The object-centric states that are passed around in planning do not include the
     # globally constant objects, so we need to create an exemplar state that does
     # include them and then copy in the changing values before calling step().
     exemplar_state = sim.reset()[0]
-    
+
     # Create the transition function.
-    def transition_fn(x: ObjectCentricState, u: tuple[float, ...]) -> ObjectCentricState:
+    def transition_fn(
+        x: ObjectCentricState, u: tuple[float, ...]
+    ) -> ObjectCentricState:
         """Simulate the action."""
         # See note above re: why we can't just sim.reset(options={"init_state": x}).
         state = exemplar_state.copy()
@@ -55,19 +72,19 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         # Now we can reset().
         sim.reset(options={"init_state": state})
         sim_obs, _, _, _, _ = sim.step(action_to_executable(u))
-        
+
         # Uncomment to debug.
         # import imageio.v2 as iio
         # import time
         # img = sim.render()
         # iio.imsave(f"debug/debug-sim-{int(time.time()*1000.0)}.png", img)
-        
+
         # Now we need to extract back out the changing objects.
         next_x = x.copy()
         for obj in x:
             next_x.data[obj] = sim_obs.data[obj]
         return next_x
-    
+
     # Types.
     types = {CRVRobotType, RectangleType, TargetBlockType, TargetSurfaceType}
 
@@ -86,6 +103,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
 
     # State abstractor.
     static_state_cache = {}  # being extra safe for now
+
     def state_abstractor(x: ObjectCentricState) -> set[GroundAtom]:
         """Get the abstract state for the current state."""
         robot = CRVRobotType("robot")
@@ -110,7 +128,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
                 atoms.add(GroundAtom(OnTable, [block]))
         objects = {robot, target, target_surface} | obstructions
         return RelationalAbstractState(atoms, objects)
-    
+
     # Goal abstractor.
     def goal_deriver(x: ObjectCentricState) -> set[GroundAtom]:
         """The goal is always the same in this environment."""
@@ -118,7 +136,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         target = TargetBlockType("target_block")
         atoms = {GroundAtom(OnTarget, [target])}
         return RelationalAbstractGoal(atoms, state_abstractor)
-    
+
     # Operators.
     robot = CRVRobotType("?robot")
     block = RectangleType("?block")
@@ -154,8 +172,13 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
     # Controllers.
     class _CommonGroundController(GroundParameterizedController, abc.ABC):
         """Shared controller code between picking and placing."""
-    
-        def __init__(self, objects: Sequence[Object], safe_y: float = 0.8, max_delta: float = 0.025) -> None:
+
+        def __init__(
+            self,
+            objects: Sequence[Object],
+            safe_y: float = 0.8,
+            max_delta: float = 0.025,
+        ) -> None:
             robot, block = objects
             assert robot.is_instance(CRVRobotType)
             assert block.is_instance(RectangleType)
@@ -169,15 +192,21 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
             self._max_delta = max_delta
 
         @abc.abstractmethod
-        def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
+        def _generate_waypoints(
+            self, state: ObjectCentricState
+        ) -> list[tuple[float, float]]:
             """Generate a waypoint plan."""
 
         @abc.abstractmethod
         def _get_vacuum_actions(self) -> tuple[float, float]:
             """Get vacuum actions for during and after waypoint movement."""
 
-        def _waypoints_to_plan(self, state: ObjectCentricState, waypoints: list[tuple[float, float]],
-                               vacuum_during_plan: float) -> list[NDArray[np.float32]]:
+        def _waypoints_to_plan(
+            self,
+            state: ObjectCentricState,
+            waypoints: list[tuple[float, float]],
+            vacuum_during_plan: float,
+        ) -> list[NDArray[np.float32]]:
             current_pos = (state.get(self._robot, "x"), state.get(self._robot, "y"))
             waypoints = [current_pos] + waypoints
             plan: list[NDArray[np.float32]] = []
@@ -186,7 +215,12 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
                     continue
                 total_dx = end[0] - start[0]
                 total_dy = end[1] - start[1]
-                num_steps = int(max(np.ceil(abs(total_dx) / self._max_delta), np.ceil(abs(total_dy) / self._max_delta)))
+                num_steps = int(
+                    max(
+                        np.ceil(abs(total_dx) / self._max_delta),
+                        np.ceil(abs(total_dy) / self._max_delta),
+                    )
+                )
                 dx = total_dx / num_steps
                 dy = total_dy / num_steps
                 action = (dx, dy, 0, 0, vacuum_during_plan)
@@ -196,7 +230,7 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
             return plan
 
         def reset(self, x: ObjectCentricState, params: float) -> None:
-            self._params = params
+            self._current_params = params
             self._current_plan = None
             self._current_state = x
 
@@ -226,30 +260,38 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
                 (0, executable_space.high[1], 0, 0, vacuum_after_plan),
             ]
             return waypoint_plan + plan_suffix
-        
 
     class GroundPickController(_CommonGroundController):
         """Controller for picking a block when the robot's hand is free.
-        
+
         This controller uses waypoints rather than doing motion planning. This is just
         because the environment is simple enough where waypoints should always work.
 
-        The parameters for this controller represent the grasp x position RELATIVE to 
+        The parameters for this controller represent the grasp x position RELATIVE to
         the center of the block.
         """
 
-        def sample_parameters(self, x: ObjectCentricState, rng: np.random.Generator) -> float:
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> float:
             gripper_height = x.get(self._robot, "gripper_height")
             block_width = x.get(self._block, "width")
-            radius = (gripper_height + block_width) / 2
-            return rng.uniform(-radius, radius)
-        
-        def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
+            params = rng.uniform(-gripper_height / 2, block_width + gripper_height / 2)
+            return params
+
+        def _generate_waypoints(
+            self, state: ObjectCentricState
+        ) -> list[tuple[float, float]]:
             robot_x = state.get(self._robot, "x")
             block_x = state.get(self._block, "x")
             robot_arm_joint = state.get(self._robot, "arm_joint")
-            target_x, target_y = get_robot_transfer_position(self._block, state, block_x, robot_arm_joint,
-                                                             relative_x_offset=self._current_params)
+            target_x, target_y = get_robot_transfer_position(
+                self._block,
+                state,
+                block_x,
+                robot_arm_joint,
+                relative_x_offset=self._current_params,
+            )
             return [
                 # Start by moving to safe height (may already be there).
                 (robot_x, self._safe_y),
@@ -262,25 +304,31 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 0.0, 1.0
 
-
     class _GroundPlaceController(_CommonGroundController):
         """Controller for placing a held block.
-        
+
         This controller uses waypoints rather than doing motion planning. This is just
         because the environment is simple enough where waypoints should always work.
 
         The parameters for this controller represent the ABSOLUTE x position where the
         robot will release the held block.
         """
-        
-        def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
+
+        def _generate_waypoints(
+            self, state: ObjectCentricState
+        ) -> list[tuple[float, float]]:
             robot_x = state.get(self._robot, "x")
             block_x = state.get(self._block, "x")
             robot_arm_joint = state.get(self._robot, "arm_joint")
-            placement_x = self._params
-            offset_x = (block_x - robot_x)  # account for relative grasp
-            target_x, target_y = get_robot_transfer_position(self._block, state, placement_x, robot_arm_joint,
-                                                             relative_x_offset=offset_x)
+            placement_x = self._current_params
+            offset_x = block_x - robot_x  # account for relative grasp
+            target_x, target_y = get_robot_transfer_position(
+                self._block,
+                state,
+                placement_x,
+                robot_arm_joint,
+                relative_x_offset=offset_x,
+            )
 
             return [
                 # Start by moving to safe height (may already be there).
@@ -293,34 +341,34 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 1.0, 0.0
-        
-    
+
     class GroundPlaceOnTableController(_GroundPlaceController):
         """Controller for placing a held block on the table."""
 
-        def sample_parameters(self, x: ObjectCentricState, rng: np.random.Generator) -> float:
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> float:
             world_min_x = 0.0
             world_max_x = 1.0
             return rng.uniform(world_min_x, world_max_x)
 
-
     class GroundPlaceOnTargetController(_GroundPlaceController):
         """Controller for placing a held block on the target."""
 
-        def sample_parameters(self, x: ObjectCentricState, rng: np.random.Generator) -> float:
-            # TODO account for gripper displacement also
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> float:
             surface = x.get_objects(TargetSurfaceType)[0]
             target_x = x.get(surface, "x")
             target_width = x.get(surface, "width")
             block_x = x.get(self._block, "x")
             robot_x = x.get(self._robot, "x")
-            offset_x = (block_x - robot_x)  # account for relative grasp
+            offset_x = block_x - robot_x  # account for relative grasp
             center_x = target_x + offset_x
             block_width = x.get(self._block, "width")
             radius = (target_width - block_width) / 2
             assert radius >= 0
             return rng.uniform(center_x - radius, center_x + radius)
-
 
     PickController = LiftedParameterizedController(
         [robot, block],
@@ -358,19 +406,28 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         action_to_executable,
         state_abstractor,
         goal_deriver,
-        skills
+        skills,
     )
 
 
-def get_robot_transfer_position(block: Object, state: ObjectCentricState,
-                                block_x: float,
-                                robot_arm_joint: float,
-                             relative_x_offset: float = 0) -> tuple[float, float]:
+def get_robot_transfer_position(
+    block: Object,
+    state: ObjectCentricState,
+    block_x: float,
+    robot_arm_joint: float,
+    relative_x_offset: float = 0,
+) -> tuple[float, float]:
     """Get the x, y position that the robot should be at to place or grasp the block."""
     robot = state.get_objects(CRVRobotType)[0]
     surface = state.get_objects(TargetSurfaceType)[0]
     ground = state.get(surface, "y") + state.get(surface, "height")
     padding = 1e-6
     x = block_x + relative_x_offset
-    y = ground + state.get(block, "height") + robot_arm_joint + state.get(robot, "gripper_width") / 2 + padding
+    y = (
+        ground
+        + state.get(block, "height")
+        + robot_arm_joint
+        + state.get(robot, "gripper_width") / 2
+        + padding
+    )
     return (x, y)

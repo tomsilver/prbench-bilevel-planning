@@ -1,12 +1,16 @@
 """Tests for obstruction_2d.py."""
-from conftest import MAKE_VIDEOS
-import pytest
-import prbench
-from gymnasium.wrappers import RecordVideo
-from prbench_bilevel_planning.env_models import create_bilevel_planning_models
-from prbench_bilevel_planning.agent import BilevelPlanningAgent
-from prbench_bilevel_planning.env_models.obstruction2d import get_robot_transfer_position
+
 import numpy as np
+import prbench
+import pytest
+from conftest import MAKE_VIDEOS
+from gymnasium.wrappers import RecordVideo
+
+from prbench_bilevel_planning.agent import BilevelPlanningAgent
+from prbench_bilevel_planning.env_models import create_bilevel_planning_models
+from prbench_bilevel_planning.env_models.obstruction2d import (
+    get_robot_transfer_position,
+)
 
 prbench.register_all_environments()
 
@@ -14,8 +18,9 @@ prbench.register_all_environments()
 def test_obstruction2d_observation_to_state():
     """Tests for observation_to_state() in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o1-v0")
-    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
-                                                num_obstructions=1)
+    env_models = create_bilevel_planning_models(
+        "obstruction2d", env.observation_space, env.action_space, num_obstructions=1
+    )
     observation_to_state = env_models.observation_to_state
     obs, _ = env.reset(seed=123)
     state = observation_to_state(obs)
@@ -28,8 +33,9 @@ def test_obstruction2d_observation_to_state():
 def test_obstruction2d_action_to_executable():
     """Tests for action_to_executable() in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o1-v0")
-    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
-                                                num_obstructions=1)
+    env_models = create_bilevel_planning_models(
+        "obstruction2d", env.observation_space, env.action_space, num_obstructions=1
+    )
     action_space = env_models.action_space
     executable_space = env_models.executable_space
     assert executable_space == env.action_space
@@ -46,8 +52,9 @@ def test_obstruction2d_transition_fn():
     """Tests for transition_fn() in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o1-v0")
     env.action_space.seed(123)
-    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
-                                                num_obstructions=1)
+    env_models = create_bilevel_planning_models(
+        "obstruction2d", env.observation_space, env.action_space, num_obstructions=1
+    )
     transition_fn = env_models.transition_fn
     obs, _ = env.reset(seed=123)
     state = env_models.observation_to_state(obs)
@@ -65,8 +72,9 @@ def test_obstruction2d_transition_fn():
 def test_obstruction2d_goal_deriver():
     """Tests for goal_deriver() in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o1-v0")
-    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
-                                                num_obstructions=1)
+    env_models = create_bilevel_planning_models(
+        "obstruction2d", env.observation_space, env.action_space, num_obstructions=1
+    )
     goal_deriver = env_models.goal_deriver
     obs, _ = env.reset(seed=123)
     state = env_models.observation_to_state(obs)
@@ -79,8 +87,9 @@ def test_obstruction2d_goal_deriver():
 def test_obstruction2d_state_abstractor():
     """Tests for state_abstractor() in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o1-v0")
-    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
-                                                num_obstructions=1)
+    env_models = create_bilevel_planning_models(
+        "obstruction2d", env.observation_space, env.action_space, num_obstructions=1
+    )
     state_abstractor = env_models.state_abstractor
     pred_name_to_pred = {p.name: p for p in env_models.predicates}
     Holding = pred_name_to_pred["Holding"]
@@ -98,11 +107,16 @@ def test_obstruction2d_state_abstractor():
     assert len(abstract_state.atoms) == 3
     assert HandEmpty([robot]) in abstract_state.atoms
     assert OnTable([target_block]) in abstract_state.atoms
-    assert OnTable([obstruction0]) in abstract_state.atoms or OnTarget([obstruction0]) in abstract_state.atoms
+    assert (
+        OnTable([obstruction0]) in abstract_state.atoms
+        or OnTarget([obstruction0]) in abstract_state.atoms
+    )
     # Create state where robot is holding the target block.
     target_block_x = state.get(target_block, "x")
     robot_arm_joint = state.get(robot, "arm_joint")
-    robot_x, robot_y = get_robot_transfer_position(target_block, state, target_block_x, robot_arm_joint)
+    robot_x, robot_y = get_robot_transfer_position(
+        target_block, state, target_block_x, robot_arm_joint
+    )
     state1 = state.copy()
     state1.set(robot, "x", robot_x)
     state1.set(robot, "y", robot_y)
@@ -119,7 +133,9 @@ def test_obstruction2d_state_abstractor():
 
     # Create state where robot is holding the obstruction.
     obstruction_x = state.get(obstruction0, "x")
-    robot_x, robot_y = get_robot_transfer_position(obstruction0, state, obstruction_x, robot_arm_joint)
+    robot_x, robot_y = get_robot_transfer_position(
+        obstruction0, state, obstruction_x, robot_arm_joint
+    )
     state2 = state.copy()
     state2.set(robot, "x", robot_x)
     state2.set(robot, "y", robot_y)
@@ -134,14 +150,15 @@ def test_obstruction2d_state_abstractor():
     assert OnTarget([target_block]) in abstract_state3.atoms
 
 
-def _skill_test_helper(ground_skill, env_models, env, obs,
-                       params=None):
+def _skill_test_helper(ground_skill, env_models, env, obs, params=None):
     rng = np.random.default_rng(123)
     state = env_models.observation_to_state(obs)
     abstract_state = env_models.state_abstractor(state)
     operator = ground_skill.operator
     assert operator.preconditions.issubset(abstract_state.atoms)
-    predicted_next_atoms = (abstract_state.atoms - operator.delete_effects) | operator.add_effects
+    predicted_next_atoms = (
+        abstract_state.atoms - operator.delete_effects
+    ) | operator.add_effects
     controller = ground_skill.controller
     if params is None:
         params = controller.sample_parameters(state, rng)
@@ -154,10 +171,10 @@ def _skill_test_helper(ground_skill, env_models, env, obs,
         controller.observe(state)
 
         # Uncomment to debug.
-        import imageio.v2 as iio
-        import time
-        img = env.render()
-        iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
+        # import imageio.v2 as iio
+        # import time
+        # img = env.render()
+        # iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
 
         if controller.terminated():
             break
@@ -171,8 +188,9 @@ def _skill_test_helper(ground_skill, env_models, env, obs,
 def test_obstruction2d_skills():
     """Tests for skills in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o0-v0")
-    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
-                                                num_obstructions=0)
+    env_models = create_bilevel_planning_models(
+        "obstruction2d", env.observation_space, env.action_space, num_obstructions=0
+    )
     skill_name_to_skill = {s.operator.name: s for s in env_models.skills}
     PickFromTable = skill_name_to_skill["PickFromTable"]
     PickFromTarget = skill_name_to_skill["PickFromTarget"]
@@ -193,8 +211,9 @@ def test_obstruction2d_skills():
     # Test placing the target block back on the table in the exact same position.
     target_x = state0.get(target_block, "x")
     target_y = state0.get(target_block, "y")
-    obs2 = _skill_test_helper(place_target_block_on_table, env_models, env, obs1,
-                              params=target_x)
+    obs2 = _skill_test_helper(
+        place_target_block_on_table, env_models, env, obs1, params=target_x
+    )
     state2 = env_models.observation_to_state(obs2)
     actual_x = state2.get(target_block, "x")
     actual_y = state2.get(target_block, "y")
@@ -208,30 +227,35 @@ def test_obstruction2d_skills():
     _skill_test_helper(pick_target_block_from_target, env_models, env, obs4)
 
 
-
-@pytest.mark.parametrize("num_obstructions", [0])  # TODO[0, 1, 2]
+@pytest.mark.parametrize("num_obstructions", [0])  # TODO [0, 1, 2]
 def test_obstruction2d_bilevel_planning(num_obstructions):
     """Tests for bilevel planning in the Obstruction2D environment.
-    
+
     Note that we only test a small number of obstructions to keep tests fast. Use
     experiment scripts to evaluate at scale.
     """
 
-    env = prbench.make(f"prbench/Obstruction2D-o{num_obstructions}-v0", render_mode="rgb_array")
+    env = prbench.make(
+        f"prbench/Obstruction2D-o{num_obstructions}-v0", render_mode="rgb_array"
+    )
 
     if MAKE_VIDEOS:
         # TODO fix this...
-        env = RecordVideo(env, "unit_test_videos") #, name_prefix=env.spec.id)
+        env = RecordVideo(env, "unit_test_videos")  # , name_prefix=env.spec.id)
 
-    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
-                                                num_obstructions=num_obstructions)
+    env_models = create_bilevel_planning_models(
+        "obstruction2d",
+        env.observation_space,
+        env.action_space,
+        num_obstructions=num_obstructions,
+    )
     agent = BilevelPlanningAgent(env_models, seed=123)
 
     obs, info = env.reset(seed=123)
 
     import imageio.v2 as iio
+
     imgs = [env.render()]
-    # iio.imsave("debug-env.png", img)
 
     total_reward = 0
     agent.reset(obs, info)

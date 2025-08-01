@@ -1,8 +1,6 @@
 """A general interface for an agent that runs bilevel planning."""
 
-from prpl_utils.gym_agent import Agent
-from typing import TypeVar, Hashable
-from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
+from typing import Hashable, TypeVar
 
 from bilevel_planning.abstract_plan_generators.heuristic_search_plan_generator import (
     RelationalHeuristicSearchAbstractPlanGenerator,
@@ -18,6 +16,9 @@ from bilevel_planning.utils import (
     RelationalAbstractSuccessorGenerator,
     RelationalControllerGenerator,
 )
+from prpl_utils.gym_agent import Agent
+
+from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
 
 _O = TypeVar("_O", bound=Hashable)
 _U = TypeVar("_U", bound=Hashable)
@@ -26,13 +27,16 @@ _U = TypeVar("_U", bound=Hashable)
 class BilevelPlanningAgent(Agent[_O, _U]):
     """A general interface for an agent that runs bilevel planning."""
 
-    def __init__(self, env_models: BilevelPlanningEnvModels, seed: int,
-                 max_abstract_plans: int = 10,
-                 samples_per_step: int = 10,
-                 max_skill_horizon: int = 100,
-                 heuristic_name: str = "hff",
-                 planning_timeout: float = 30.0
-                 ) -> None:
+    def __init__(
+        self,
+        env_models: BilevelPlanningEnvModels,
+        seed: int,
+        max_abstract_plans: int = 1,  # TODO
+        samples_per_step: int = 2,  # TODO
+        max_skill_horizon: int = 100,
+        heuristic_name: str = "hff",
+        planning_timeout: float = 30.0,
+    ) -> None:
         self._env_models = env_models
         self._current_plan: list[_U] | None = None
         self._max_abstract_plans = max_abstract_plans
@@ -42,13 +46,13 @@ class BilevelPlanningAgent(Agent[_O, _U]):
         self._planning_timeout = planning_timeout
         self._seed = seed
         super().__init__(seed)
-    
+
     def _get_action(self) -> _U:
         if self._current_plan is None:
             self._current_plan = self._run_planning()
         assert self._current_plan, "Ran out of planning steps, failure!"
         return self._current_plan.pop(0)
-    
+
     def _run_planning(self) -> list[_U]:
         # Create planning problem.
         initial_state = self._env_models.observation_to_state(self._last_observation)
@@ -79,7 +83,9 @@ class BilevelPlanningAgent(Agent[_O, _U]):
         )
 
         # Create the abstract successor function (not really used).
-        abstract_successor_fn = RelationalAbstractSuccessorGenerator(self._env_models.operators)
+        abstract_successor_fn = RelationalAbstractSuccessorGenerator(
+            self._env_models.operators
+        )
 
         # Finish the planner.
         planner = SesamePlanner(
