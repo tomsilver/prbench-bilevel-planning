@@ -370,6 +370,10 @@ def create_bilevel_planning_models(
             lower_x = target_x + offset_x
             block_width = x.get(self._block, "width")
             upper_x = lower_x + (target_width - block_width)
+            # This can happen if we are placing an obstruction onto the target surface.
+            # Obstructions can be larger than the target surface.
+            if lower_x > upper_x:
+                lower_x, upper_x = upper_x, lower_x
             return rng.uniform(lower_x, upper_x)
 
     PickController: LiftedParameterizedController = LiftedParameterizedController(
