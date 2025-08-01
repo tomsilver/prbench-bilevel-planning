@@ -69,6 +69,9 @@ def test_goal_deriver():
     obs, _ = env.reset(seed=123)
     state = env_models.observation_to_state(obs)
     goal = goal_deriver(state)
+    assert len(goal.atoms) == 1
+    goal_atom = next(iter(goal.atoms))
+    assert str(goal_atom) == "(OnTarget target_block)"
 
 
 
