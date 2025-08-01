@@ -243,7 +243,6 @@ def test_obstruction2d_bilevel_planning(num_obstructions):
     )
 
     if MAKE_VIDEOS:
-        # TODO fix this...
         env = RecordVideo(env, "unit_test_videos")  # , name_prefix=env.spec.id)
 
     env_models = create_bilevel_planning_models(
@@ -256,9 +255,9 @@ def test_obstruction2d_bilevel_planning(num_obstructions):
 
     obs, info = env.reset(seed=123)
 
-    import imageio.v2 as iio
+    # import imageio.v2 as iio
 
-    imgs = [env.render()]
+    # imgs = [env.render()]
 
     total_reward = 0
     agent.reset(obs, info)
@@ -267,7 +266,7 @@ def test_obstruction2d_bilevel_planning(num_obstructions):
         obs, reward, terminated, truncated, info = env.step(action)
 
         # TODO remove
-        imgs.append(env.render())
+        # imgs.append(env.render())
 
         total_reward += reward
         agent.update(obs, reward, terminated or truncated, info)
@@ -278,4 +277,4 @@ def test_obstruction2d_bilevel_planning(num_obstructions):
     env.close()
 
     # TODO remove
-    iio.mimsave("unit_test_videos/obstruction2d.mp4", imgs)
+    # iio.mimsave("unit_test_videos/obstruction2d.mp4", imgs)
