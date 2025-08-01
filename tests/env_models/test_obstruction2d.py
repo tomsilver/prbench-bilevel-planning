@@ -6,6 +6,7 @@ from gymnasium.wrappers import RecordVideo
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
 from prbench_bilevel_planning.agent import BilevelPlanningAgent
 from prbench_bilevel_planning.env_models.obstruction2d import get_robot_transfer_position
+import numpy as np
 
 prbench.register_all_environments()
 
@@ -61,7 +62,7 @@ def test_obstruction2d_transition_fn():
     env.close()
 
 
-def test_goal_deriver():
+def test_obstruction2d_goal_deriver():
     """Tests for goal_deriver() in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o1-v0")
     env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
@@ -75,7 +76,7 @@ def test_goal_deriver():
     assert str(goal_atom) == "(OnTarget target_block)"
 
 
-def test_state_abstractor():
+def test_obstruction2d_state_abstractor():
     """Tests for state_abstractor() in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o1-v0")
     env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
@@ -123,6 +124,75 @@ def test_state_abstractor():
     abstract_state3 = state_abstractor(state3)
     assert OnTarget([target_block]) in abstract_state3.atoms
 
+
+def _skill_test_helper(ground_skill, env_models, env, current_obs,
+                       assert_abstract_state_correct=True,
+                       params=None):
+    rng = np.random.default_rng(123)
+    state = env_models.observation_to_state(current_obs)
+    abstract_state = env_models.state_abstractor(state)
+    operator = ground_skill.operator
+    assert operator.preconditions.issubset(abstract_state.atoms)
+    predicted_next_atoms = (abstract_state.atoms - operator.delete_effects) | operator.add_effects
+    controller = ground_skill.controller
+    if params is None:
+        params = controller.sample_parameters(state, rng)
+    controller.reset(state, params)
+    for _ in range(100):
+        action = controller.step()
+        executable = env_models.action_to_executable(action)
+        obs, _, _, _, _ = env.step(executable)
+        state = env_models.observation_to_state(obs)
+        controller.observe(state)
+        if controller.terminated():
+            break
+
+        # Uncomment to debug.
+        import imageio.v2 as iio
+        import time
+        img = env.render()
+        iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
+
+    else:
+        assert False, "Controller did not terminate"
+    next_abstract_state = env_models.state_abstractor(state)
+    if assert_abstract_state_correct:
+        assert next_abstract_state.atoms == predicted_next_atoms
+    return obs
+
+
+def test_obstruction2d_skills():
+    """Tests for skills in the Obstruction2D environment."""
+    env = prbench.make("prbench/Obstruction2D-o0-v0")
+    env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
+                                                num_obstructions=0)
+    skill_name_to_skill = {s.operator.name: s for s in env_models.skills}
+    PickFromTable = skill_name_to_skill["PickFromTable"]
+    PickFromTarget = skill_name_to_skill["PickFromTarget"]
+    PlaceOnTable = skill_name_to_skill["PlaceOnTable"]
+    PlaceOnTarget = skill_name_to_skill["PlaceOnTarget"]
+    obs0, _ = env.reset(seed=123)
+    state0 = env_models.observation_to_state(obs0)
+    abstract_state = env_models.state_abstractor(state0)
+    obj_name_to_obj = {o.name: o for o in abstract_state.objects}
+    robot = obj_name_to_obj["robot"]
+    target_block = obj_name_to_obj["target_block"]
+    pick_target_block_from_table = PickFromTable.ground((robot, target_block))
+    pick_target_block_from_target = PickFromTarget.ground((robot, target_block))
+    place_target_block_on_table = PlaceOnTable.ground((robot, target_block))
+    place_target_block_on_target = PlaceOnTarget.ground((robot, target_block))
+    # Test picking the target block from the table.
+    obs1 = _skill_test_helper(pick_target_block_from_table, env_models, env, obs0)
+    # Test placing the target block back on the table in the exact same position.
+    target_x = state0.get(target_block, "x")
+    target_y = state0.get(target_block, "y")
+    obs2 = _skill_test_helper(place_target_block_on_table, env_models, env, obs1,
+                              params=target_x)
+    state2 = env_models.observation_to_state(obs2)
+    actual_x = state2.get(target_block, "x")
+    actual_y = state2.get(target_block, "y")
+    assert np.isclose(target_x, actual_x)
+    assert np.isclose(target_y, actual_y)
 
 
 

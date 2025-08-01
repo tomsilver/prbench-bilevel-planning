@@ -221,13 +221,6 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
             final_action = (0, 0, 0, 0, vacuum_after_plan)
             return waypoint_plan + [final_action]
         
-        def _get_transfer_y(self, state: ObjectCentricState) -> float:
-            surface = state.get_objects(TargetSurfaceType)[0]
-            ground = state.get(surface, "y") + state.get(surface, "height")
-            padding = 1e-6 # TODO figure out where this needs to come from...
-            transfer_y = ground + state.get(self._block, "height") + state.get(self._robot, "arm_joint") + state.get(self._robot, "gripper_width") + padding
-            return transfer_y
-
 
     class GroundPickController(_CommonGroundController):
         """Controller for picking a block when the robot's hand is free.
@@ -247,8 +240,10 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         
         def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
             robot_x = state.get(self._robot, "x")
-            target_x = state.get(self._block, "x") + self._params
-            target_y = self._get_transfer_y(state)
+            block_x = state.get(self._block, "x")
+            robot_arm_joint = state.get(self._robot, "arm_joint")
+            target_x, target_y = get_robot_transfer_position(self._block, state, block_x, robot_arm_joint,
+                                                             relative_x_offset=self._current_params)
             return [
                 # Start by moving to safe height (may already be there).
                 (robot_x, self._safe_y),
@@ -274,8 +269,13 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         
         def _generate_waypoints(self, state: ObjectCentricState) -> list[tuple[float, float]]:
             robot_x = state.get(self._robot, "x")
-            target_x = self._params
-            target_y = self._get_transfer_y(state)
+            block_x = state.get(self._block, "x")
+            robot_arm_joint = state.get(self._robot, "arm_joint")
+            placement_x = self._params
+            offset_x = (block_x - robot_x)  # account for relative grasp
+            target_x, target_y = get_robot_transfer_position(self._block, state, placement_x, robot_arm_joint,
+                                                             relative_x_offset=offset_x)
+
             return [
                 # Start by moving to safe height (may already be there).
                 (robot_x, self._safe_y),
