@@ -79,10 +79,10 @@ def create_bilevel_planning_models(
         sim_obs, _, _, _, _ = sim.step(action_to_executable(u))
 
         # Uncomment to debug.
-        import imageio.v2 as iio
-        import time
-        img = sim.render()
-        iio.imsave(f"debug/debug-sim-{int(time.time()*1000.0)}.png", img)
+        # import imageio.v2 as iio
+        # import time
+        # img = sim.render()
+        # iio.imsave(f"debug/debug-sim-{int(time.time()*1000.0)}.png", img)
 
         # Now we need to extract back out the changing objects.
         next_x = x.copy()

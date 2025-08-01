@@ -230,8 +230,12 @@ def test_obstruction2d_skills():
     _skill_test_helper(pick_target_block_from_target, env_models, env, obs4)
 
 
-@pytest.mark.parametrize("num_obstructions", [0])  # TODO [0, 1, 2]
-def test_obstruction2d_bilevel_planning(num_obstructions):
+@pytest.mark.parametrize("num_obstructions, max_abstract_plans, samples_per_step",
+                         [
+                            #  (0, 1, 1),
+                          (1, 10, 1)
+                        ])
+def test_obstruction2d_bilevel_planning(num_obstructions, max_abstract_plans, samples_per_step):
     """Tests for bilevel planning in the Obstruction2D environment.
 
     Note that we only test a small number of obstructions to keep tests fast. Use
@@ -243,7 +247,7 @@ def test_obstruction2d_bilevel_planning(num_obstructions):
     )
 
     if MAKE_VIDEOS:
-        env = RecordVideo(env, "unit_test_videos")  # , name_prefix=env.spec.id)
+        env = RecordVideo(env, "unit_test_videos", name_prefix="obstruction2d")
 
     env_models = create_bilevel_planning_models(
         "obstruction2d",
@@ -251,30 +255,20 @@ def test_obstruction2d_bilevel_planning(num_obstructions):
         env.action_space,
         num_obstructions=num_obstructions,
     )
-    agent = BilevelPlanningAgent(env_models, seed=123)
+    agent = BilevelPlanningAgent(env_models, seed=123, max_abstract_plans=max_abstract_plans, samples_per_step=samples_per_step)
 
     obs, info = env.reset(seed=123)
-
-    # import imageio.v2 as iio
-
-    # imgs = [env.render()]
 
     total_reward = 0
     agent.reset(obs, info)
     for _ in range(1000):
         action = agent.step()
         obs, reward, terminated, truncated, info = env.step(action)
-
-        # TODO remove
-        # imgs.append(env.render())
-
         total_reward += reward
         agent.update(obs, reward, terminated or truncated, info)
         if terminated or truncated:
             break
-    # TODO assert something about total reward
+    else:
+        assert False, "Did not terminate successfully"
 
     env.close()
-
-    # TODO remove
-    # iio.mimsave("unit_test_videos/obstruction2d.mp4", imgs)
