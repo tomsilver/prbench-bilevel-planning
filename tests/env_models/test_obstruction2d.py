@@ -5,6 +5,7 @@ import prbench
 from gymnasium.wrappers import RecordVideo
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
 from prbench_bilevel_planning.agent import BilevelPlanningAgent
+from prbench_bilevel_planning.env_models.obstruction2d import get_robot_transfer_position
 
 prbench.register_all_environments()
 
@@ -96,6 +97,26 @@ def test_state_abstractor():
     assert HandEmpty([robot]) in abstract_state.atoms
     assert OnTable([target_block]) in abstract_state.atoms
     assert OnTable([obstruction0]) in abstract_state.atoms or OnTarget([obstruction0]) in abstract_state.atoms
+    # Create state where robot is holding the target block.
+    target_block_x = state.get(target_block, "x")
+    robot_arm_joint = state.get(robot, "arm_joint")
+    robot_x, robot_y = get_robot_transfer_position(target_block, state, target_block_x, robot_arm_joint)
+    state1 = state.copy()
+    state1.set(robot, "x", robot_x)
+    state1.set(robot, "y", robot_y)
+    state1.set(robot, "vacuum", 1.0)
+    abstract_state1 = state_abstractor(state1)
+    assert Holding([robot, target_block]) in abstract_state1.atoms
+    # Create state where robot is holding the obstruction.
+    obstruction_x = state.get(obstruction0, "x")
+    robot_x, robot_y = get_robot_transfer_position(obstruction0, state, obstruction_x, robot_arm_joint)
+    state2 = state.copy()
+    state2.set(robot, "x", robot_x)
+    state2.set(robot, "y", robot_y)
+    state2.set(robot, "vacuum", 1.0)
+    abstract_state2 = state_abstractor(state2)
+    assert Holding([robot, obstruction0]) in abstract_state2.atoms
+
 
 
 @pytest.mark.parametrize("num_obstructions", [0])  # TODO[0, 1, 2]

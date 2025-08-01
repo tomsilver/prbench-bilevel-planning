@@ -109,7 +109,6 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
             elif block not in suctioned_objs:
                 atoms.add(GroundAtom(OnTable, [block]))
         objects = {robot, target} | obstructions
-        print(sorted(atoms))
         return RelationalAbstractState(atoms, objects)
     
     # Goal abstractor.
@@ -348,3 +347,18 @@ def create_bilevel_planning_models(observation_space: Space, executable_space: S
         goal_deriver,
         skills
     )
+
+
+def get_robot_transfer_position(block: Object, state: ObjectCentricState,
+                                block_x: float,
+                                robot_arm_joint: float,
+                             relative_x_offset: float = 0) -> tuple[float, float]:
+    """Get the x, y position that the robot should be at to place or grasp the block."""
+    # TODO incorporate into controller
+    robot = state.get_objects(CRVRobotType)[0]
+    surface = state.get_objects(TargetSurfaceType)[0]
+    ground = state.get(surface, "y") + state.get(surface, "height")
+    padding = 1e-6
+    x = block_x + relative_x_offset
+    y = ground + state.get(block, "height") + robot_arm_joint + state.get(robot, "gripper_width") + padding
+    return (x, y)
