@@ -76,7 +76,7 @@ def test_goal_deriver():
 
 
 def test_state_abstractor():
-    """Tests for state_abstractor()in the Obstruction2D environment."""
+    """Tests for state_abstractor() in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o1-v0")
     env_models = create_bilevel_planning_models("obstruction2d", env.observation_space, env.action_space,
                                                 num_obstructions=1)
