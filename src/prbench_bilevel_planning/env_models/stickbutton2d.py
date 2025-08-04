@@ -425,9 +425,14 @@ def create_bilevel_planning_models(
             stick_y = state.get(self._stick, "y")
             robot_arm_joint = state.get(self._robot, "arm_joint")
             
-            # Calculate target position for grasping
+            # Calculate target position for grasping using similar logic to obstruction2d
             target_x = stick_x + self._current_params
-            target_y = stick_y + robot_arm_joint + state.get(self._robot, "gripper_width") / 2
+            # The robot needs to be positioned so its gripper tip reaches the stick
+            # stick_y is the center of the stick, we need to account for stick height and gripper positioning
+            stick_height = state.get(self._stick, "height")
+            gripper_width = state.get(self._robot, "gripper_width")
+            padding = 1e-4
+            target_y = stick_y + stick_height/2 + robot_arm_joint + gripper_width/2 + padding
             
             return [
                 # Start by moving to safe height

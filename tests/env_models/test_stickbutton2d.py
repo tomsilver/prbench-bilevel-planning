@@ -238,9 +238,9 @@ def test_stickbutton2d_skills():
         "stickbutton2d", env.observation_space, env.action_space, num_buttons=1
     )
     skill_name_to_skill = {s.operator.name: s for s in env_models.skills}
-    GraspStick = skill_name_to_skill["GraspStick"]
-    ReleaseStick = skill_name_to_skill["ReleaseStick"]
-    PressButtonDirect = skill_name_to_skill["PressButtonDirect"]
+    PickStickFromNothing = skill_name_to_skill["PickStickFromNothing"]
+    PlaceStick = skill_name_to_skill["PlaceStick"]
+    StickPressButtonFromNothing = skill_name_to_skill["StickPressButtonFromNothing"]
     
     obs0, _ = env.reset(seed=123)
     state0 = env_models.observation_to_state(obs0)
@@ -250,22 +250,23 @@ def test_stickbutton2d_skills():
     stick = obj_name_to_obj["stick"]
     button0 = obj_name_to_obj["button0"]
     
-    grasp_stick = GraspStick.ground((robot, stick))
-    release_stick = ReleaseStick.ground((robot, stick))
-    press_button_direct = PressButtonDirect.ground((robot, button0))
+    # Test picking the stick from nothing (requires HandEmpty + AboveNoButton)
+    pick_stick_from_nothing = PickStickFromNothing.ground((robot, stick))
     
-    # Test grasping the stick
-    obs1 = _skill_test_helper(grasp_stick, env_models, env, obs0)
+    # Test placing the stick
+    place_stick = PlaceStick.ground((robot, stick))
     
-    # Test releasing the stick
-    obs2 = _skill_test_helper(release_stick, env_models, env, obs1)
+    # Test pressing button with stick (requires Grasped + AboveNoButton)
+    stick_press_button_from_nothing = StickPressButtonFromNothing.ground((robot, stick, button0))
     
-    # Test pressing button directly (if reachable)
-    try:
-        _skill_test_helper(press_button_direct, env_models, env, obs2)
-    except AssertionError:
-        # Button might not be directly reachable, which is expected in some cases
-        pass
+    # Test picking the stick
+    obs1 = _skill_test_helper(pick_stick_from_nothing, env_models, env, obs0)
+    
+    # Test pressing button with stick
+    obs2 = _skill_test_helper(stick_press_button_from_nothing, env_models, env, obs1)
+    
+    # Test placing the stick
+    obs3 = _skill_test_helper(place_stick, env_models, env, obs2)
 
 
 @pytest.mark.parametrize(
