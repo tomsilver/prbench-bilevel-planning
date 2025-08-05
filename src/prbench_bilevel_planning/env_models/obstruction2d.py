@@ -18,10 +18,9 @@ from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
 )
-from gymnasium.spaces import Box, Space
+from gymnasium.spaces import Space
 from numpy.typing import NDArray
 from prbench.envs.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
-from prpl_utils.spaces import FunctionalSpace
 from relational_structs import (
     GroundAtom,
     LiftedAtom,
@@ -37,11 +36,11 @@ from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
 
 
 def create_bilevel_planning_models(
-    observation_space: Space, executable_space: Space, num_obstructions: int
+    observation_space: Space, action_space: Space, num_obstructions: int
 ) -> BilevelPlanningEnvModels:
     """Create the env models for obstruction 2D."""
     assert isinstance(observation_space, ObjectCentricBoxSpace)
-    assert isinstance(executable_space, CRVRobotActionSpace)
+    assert isinstance(action_space, CRVRobotActionSpace)
 
     # Make a local copy of the environment to use as the "simulator". Note that we use
     # the object-centric version of the environment because we want access to the reset
@@ -54,11 +53,6 @@ def create_bilevel_planning_models(
         """Convert the vectors back into (hashable) object-centric states."""
         return observation_space.devectorize(o)
 
-    # Convert actions into executable actions. Actions must be hashable.
-    def action_to_executable(action: tuple[float, ...]) -> NDArray[np.float32]:
-        """Convert actions into executables."""
-        return np.array(action, dtype=np.float32)
-
     # The object-centric states that are passed around in planning do not include the
     # globally constant objects, so we need to create an exemplar state that does
     # include them and then copy in the changing values before calling step().
@@ -66,7 +60,8 @@ def create_bilevel_planning_models(
 
     # Create the transition function.
     def transition_fn(
-        x: ObjectCentricState, u: tuple[float, ...]
+        x: ObjectCentricState,
+        u: NDArray[np.float32],
     ) -> ObjectCentricState:
         """Simulate the action."""
         # See note above re: why we can't just sim.reset(options={"init_state": x}).
@@ -75,7 +70,7 @@ def create_bilevel_planning_models(
             state.data[obj] = feats
         # Now we can reset().
         sim.reset(options={"init_state": state})
-        sim_obs, _, _, _, _ = sim.step(action_to_executable(u))
+        sim_obs, _, _, _, _ = sim.step(u)
 
         # Uncomment to debug.
         # import imageio.v2 as iio
@@ -94,11 +89,6 @@ def create_bilevel_planning_models(
 
     # Create the state space.
     state_space = ObjectCentricStateSpace(types)
-
-    # Create the action space.
-    action_space: Space = FunctionalSpace(
-        contains_fn=lambda x: isinstance(x, tuple)
-    )  # weak
 
     # Predicates.
     Holding = Predicate("Holding", [CRVRobotType, RectangleType])
@@ -190,7 +180,7 @@ def create_bilevel_planning_models(
             self._block = block
             super().__init__(objects)
             self._current_params: float = 0.0  # different meanings for subclasses
-            self._current_plan: list[tuple[float, ...]] | None = None
+            self._current_plan: list[NDArray[np.float32]] | None = None
             self._current_state: ObjectCentricState | None = None
             self._safe_y = safe_y
             self._max_delta = max_delta
@@ -210,10 +200,10 @@ def create_bilevel_planning_models(
             state: ObjectCentricState,
             waypoints: list[tuple[float, float]],
             vacuum_during_plan: float,
-        ) -> list[tuple[float, ...]]:
+        ) -> list[NDArray[np.float32]]:
             current_pos = (state.get(self._robot, "x"), state.get(self._robot, "y"))
             waypoints = [current_pos] + waypoints
-            plan: list[tuple[float, ...]] = []
+            plan: list[NDArray[np.float32]] = []
             for start, end in zip(waypoints[:-1], waypoints[1:]):
                 if np.allclose(start, end):
                     continue
@@ -227,7 +217,7 @@ def create_bilevel_planning_models(
                 )
                 dx = total_dx / num_steps
                 dy = total_dy / num_steps
-                action = (dx, dy, 0, 0, vacuum_during_plan)
+                action = np.array([dx, dy, 0, 0, vacuum_during_plan], dtype=np.float32)
                 for _ in range(num_steps):
                     plan.append(action)
 
@@ -241,12 +231,12 @@ def create_bilevel_planning_models(
         def terminated(self) -> bool:
             return self._current_plan is not None and len(self._current_plan) == 0
 
-        def step(self) -> tuple[float, ...]:
+        def step(self) -> NDArray[np.float32]:
             # Always extend the arm first before planning.
             assert self._current_state is not None
             if self._current_state.get(self._robot, "arm_joint") <= 0.15:
-                assert isinstance(executable_space, Box)
-                return (0, 0, 0, executable_space.high[3], 0)
+                assert isinstance(action_space, CRVRobotActionSpace)
+                return np.array([0, 0, 0, action_space.high[3], 0], dtype=np.float32)
             if self._current_plan is None:
                 self._current_plan = self._generate_plan(self._current_state)
             return self._current_plan.pop(0)
@@ -254,16 +244,18 @@ def create_bilevel_planning_models(
         def observe(self, x: ObjectCentricState) -> None:
             self._current_state = x
 
-        def _generate_plan(self, x: ObjectCentricState) -> list[tuple[float, ...]]:
+        def _generate_plan(self, x: ObjectCentricState) -> list[NDArray[np.float32]]:
             waypoints = self._generate_waypoints(x)
             vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
             waypoint_plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
-            assert isinstance(executable_space, Box)
-            plan_suffix: list[tuple[float, ...]] = [
+            assert isinstance(action_space, CRVRobotActionSpace)
+            plan_suffix: list[NDArray[np.float32]] = [
                 # Change the vacuum.
-                (0, 0, 0, 0, vacuum_after_plan),
+                np.array([0, 0, 0, 0, vacuum_after_plan], dtype=np.float32),
                 # Move up slightly to break contact.
-                (0, executable_space.high[1], 0, 0, vacuum_after_plan),
+                np.array(
+                    [0, action_space.high[1], 0, 0, vacuum_after_plan], dtype=np.float32
+                ),
             ]
             return waypoint_plan + plan_suffix
 
@@ -406,14 +398,12 @@ def create_bilevel_planning_models(
     # Finalize the models.
     return BilevelPlanningEnvModels(
         observation_space,
-        executable_space,
         state_space,
         action_space,
         transition_fn,
         types,
         predicates,
         observation_to_state,
-        action_to_executable,
         state_abstractor,
         goal_deriver,
         skills,
