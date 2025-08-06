@@ -36,14 +36,7 @@ from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateS
 
 def create_bilevel_planning_models(
     observation_space: Space, action_space: Space, num_obstructions: int
-<<<<<<< HEAD
 ) -> SesameModels:
-||||||| b79da94
-    observation_space: Space, executable_space: Space, num_obstructions: int
-) -> BilevelPlanningEnvModels:
-=======
-) -> BilevelPlanningEnvModels:
->>>>>>> a4cacd94554bf9191ccfa8faa4b9d20946acdcea
     """Create the env models for obstruction 2D."""
     assert isinstance(observation_space, ObjectCentricBoxSpace)
     assert isinstance(action_space, CRVRobotActionSpace)
