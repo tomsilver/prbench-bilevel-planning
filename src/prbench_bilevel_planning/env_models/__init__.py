@@ -4,14 +4,13 @@ import importlib.util
 import sys
 from pathlib import Path
 
+from bilevel_planning.structs import SesameModels
 from gymnasium.spaces import Space
-
-from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
 
 
 def create_bilevel_planning_models(
     env_name: str, observation_space: Space, executable_space: Space, **kwargs
-) -> BilevelPlanningEnvModels:
+) -> SesameModels:
     """Load bilevel planning models for the given environment."""
     current_file = Path(__file__).resolve()
     env_path = current_file.parent / f"{env_name}.py"
