@@ -11,6 +11,7 @@ from bilevel_planning.abstract_plan_generators.heuristic_search_plan_generator i
 from bilevel_planning.bilevel_planners.sesame_planner import SesamePlanner
 from bilevel_planning.structs import (
     PlanningProblem,
+    SesameModels,
 )
 from bilevel_planning.trajectory_samplers.parameterized_controller_sampler import (
     ParameterizedControllerTrajectorySampler,
@@ -20,8 +21,6 @@ from bilevel_planning.utils import (
     RelationalControllerGenerator,
 )
 from prpl_utils.gym_agent import Agent
-
-from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
 
 _O = TypeVar("_O", bound=Hashable)
 _U = TypeVar("_U", bound=Hashable)
@@ -36,7 +35,7 @@ class BilevelPlanningAgent(Agent[_O, _U]):
 
     def __init__(
         self,
-        env_models: BilevelPlanningEnvModels,
+        env_models: SesameModels,
         seed: int,
         max_abstract_plans: int = 10,
         samples_per_step: int = 10,

@@ -10,6 +10,7 @@ from bilevel_planning.structs import (
     LiftedSkill,
     RelationalAbstractGoal,
     RelationalAbstractState,
+    SesameModels,
 )
 from geom2drobotenvs.concepts import is_on
 from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
@@ -32,12 +33,10 @@ from relational_structs import (
 )
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
 
-from prbench_bilevel_planning.structs import BilevelPlanningEnvModels
-
 
 def create_bilevel_planning_models(
     observation_space: Space, action_space: Space, num_obstructions: int
-) -> BilevelPlanningEnvModels:
+) -> SesameModels:
     """Create the env models for obstruction 2D."""
     assert isinstance(observation_space, ObjectCentricBoxSpace)
     assert isinstance(action_space, CRVRobotActionSpace)
@@ -396,7 +395,7 @@ def create_bilevel_planning_models(
     }
 
     # Finalize the models.
-    return BilevelPlanningEnvModels(
+    return SesameModels(
         observation_space,
         state_space,
         action_space,
