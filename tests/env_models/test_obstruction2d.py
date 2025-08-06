@@ -30,24 +30,6 @@ def test_obstruction2d_observation_to_state():
     env.close()
 
 
-def test_obstruction2d_action_to_executable():
-    """Tests for action_to_executable() in the Obstruction2D environment."""
-    env = prbench.make("prbench/Obstruction2D-o1-v0")
-    env_models = create_bilevel_planning_models(
-        "obstruction2d", env.observation_space, env.action_space, num_obstructions=1
-    )
-    action_space = env_models.action_space
-    executable_space = env_models.executable_space
-    assert executable_space == env.action_space
-    action_to_executable = env_models.action_to_executable
-    action = (0, 0, 0, 0, 0)
-    assert action_space.contains(action)
-    assert isinstance(hash(action), int)  # actiona are hashable for bilevel planning
-    executable = action_to_executable(action)
-    assert executable_space.contains(executable)
-    env.close()
-
-
 def test_obstruction2d_transition_fn():
     """Tests for transition_fn() in the Obstruction2D environment."""
     env = prbench.make("prbench/Obstruction2D-o1-v0")
@@ -59,10 +41,9 @@ def test_obstruction2d_transition_fn():
     obs, _ = env.reset(seed=123)
     state = env_models.observation_to_state(obs)
     for _ in range(100):
-        executable = env.action_space.sample()
-        obs, _, _, _, _ = env.step(executable)
+        action = env.action_space.sample()
+        obs, _, _, _, _ = env.step(action)
         next_state = env_models.observation_to_state(obs)
-        action = tuple(executable)
         predicted_next_state = transition_fn(state, action)
         assert next_state == predicted_next_state
         state = next_state
@@ -165,8 +146,7 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None):
     controller.reset(state, params)
     for _ in range(100):
         action = controller.step()
-        executable = env_models.action_to_executable(action)
-        obs, _, _, _, _ = env.step(executable)
+        obs, _, _, _, _ = env.step(action)
         next_state = env_models.observation_to_state(obs)
         controller.observe(next_state)
         assert env_models.transition_fn(state, action) == next_state

@@ -25,14 +25,12 @@ class BilevelPlanningEnvModels(Generic[_O, _E, _X, _U]):
     """Holds all bilevel planning models for one environment."""
 
     observation_space: Space[_O]
-    executable_space: Space[_E]
     state_space: Space[_X]
     action_space: Space[_U]
     transition_fn: Callable[[_X, _U], _X]
     types: set[Type]
     predicates: set[Predicate]
     observation_to_state: Callable[[_O], _X]
-    action_to_executable: Callable[[_U], _E]
     state_abstractor: Callable[[_X], RelationalAbstractState]
     goal_deriver: Callable[[_X], RelationalAbstractGoal]
     skills: set[LiftedSkill]
