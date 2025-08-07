@@ -161,4 +161,5 @@ cython_debug/
 #.idea/
 
 .vscode/
+debug/
 CLAUDE.md
