@@ -197,15 +197,12 @@ def test_stickbutton2d_state_abstractor():
     assert len(above_no_button_atoms6) == 0
 
 
-def _skill_test_helper(ground_skill, env_models, env, obs, params=None):
+def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=False):
     rng = np.random.default_rng(123)
     state = env_models.observation_to_state(obs)
     abstract_state = env_models.state_abstractor(state)
     operator = ground_skill.operator
     assert operator.preconditions.issubset(abstract_state.atoms)
-    predicted_next_atoms = (
-        abstract_state.atoms - operator.delete_effects
-    ) | operator.add_effects
     controller = ground_skill.controller
     if params is None:
         params = controller.sample_parameters(state, rng)
@@ -221,10 +218,11 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None):
         state = next_state
 
         # Uncomment to debug.
-        # import imageio.v2 as iio
-        # import time
-        # img = env.render()
-        # iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
+        if debug:
+            import imageio.v2 as iio
+            import time
+            img = env.render()
+            iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
 
         if controller.terminated():
             break
@@ -331,17 +329,17 @@ def test_stickbutton2d_skills():
     abstract_state2 = env_models.state_abstractor(state2)
     assert Pressed([button0]) not in abstract_state2.atoms
     # Now try to press button0 with stick
-    # obs3 = _skill_test_helper(
-    #     PickStickFromNothing.ground((robot, stick)), env_models, env, obs2
-    # )
-    # # Check that stick is grasped
-    # # Uncomment to debug.
-    # img = env.render()
-    # iio.imsave(f"debug/2.png", img)
-    # state3 = env_models.observation_to_state(obs3)
-    # abstract_state3 = env_models.state_abstractor(state3)
-    # Grasped = pred_name_to_pred["Grasped"]
-    # assert Grasped([robot, stick]) in abstract_state3.atoms
+    obs3 = _skill_test_helper(
+        PickStickFromNothing.ground((robot, stick)), env_models, env, obs2, debug=True
+    )
+    # Check that stick is grasped
+    # Uncomment to debug.
+    img = env.render()
+    iio.imsave(f"debug/2.png", img)
+    state3 = env_models.observation_to_state(obs3)
+    abstract_state3 = env_models.state_abstractor(state3)
+    Grasped = pred_name_to_pred["Grasped"]
+    assert Grasped([robot, stick]) in abstract_state3.atoms
 
     # # Now press button0 with stick
     # obs4 = _skill_test_helper(

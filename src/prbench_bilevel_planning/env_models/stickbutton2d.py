@@ -416,50 +416,207 @@ def create_bilevel_planning_models(
             ]
             return waypoint_plan + plan_suffix
 
-    class GroundPickStickController(_CommonGroundController):
+    class GroundPickStickController(GroundParameterizedController):
         """Controller for grasping the stick when the robot's hand is free."""
 
-        def __init__(self, objects: Sequence[Object], **kwargs) -> None:
-            super().__init__(objects, **kwargs)
+        def __init__(self, objects: Sequence[Object]) -> None:
+            self._robot = objects[0]
             self._stick = objects[1]
+            assert self._robot.is_instance(CRVRobotType)
             assert self._stick.is_instance(RectangleType)
+            super().__init__(objects)
+            self._current_params: tuple[float, float] = (0.0, 0.0)
+            self._current_plan: list[NDArray[np.float32]] | None = None
+            self._current_state: ObjectCentricState | None = None
+            # Extract max deltas from action space bounds
+            assert isinstance(action_space, CRVRobotActionSpace)
+            self._max_delta_x = action_space.high[0]
+            self._max_delta_y = action_space.high[1]
+            self._max_delta_theta = action_space.high[2]
+            self._max_delta_arm = action_space.high[3]
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
-        ) -> float:
-            # Use a much simpler approach - try to get as close as possible
-            # The obstruction2d approach works by sampling different positions
-            gripper_height = x.get(self._robot, "gripper_height")
-            stick_width = x.get(self._stick, "width")
-            # Sample positions around the stick with small offsets
-            params = rng.uniform(-gripper_height / 2, stick_width + gripper_height / 2)
-            return params
+        ) -> tuple[float, float]:
+            # Sample grasp ratio along the stick [0,1] and desired arm length
+            grasp_ratio = rng.uniform(0.0, 1.0)
+            max_arm_length = x.get(self._robot, "arm_length")
+            arm_length = rng.uniform(0.0, max_arm_length)
+            return (grasp_ratio, arm_length)
+
+        def reset(self, x: ObjectCentricState, params: tuple[float, float]) -> None:
+            self._current_params = params
+            self._current_plan = None
+            self._current_state = x
+
+        def terminated(self) -> bool:
+            return self._current_plan is not None and len(self._current_plan) == 0
+
+        def step(self) -> tuple[float, ...]:
+            # Always extend the arm first before planning
+            assert self._current_state is not None
+            if self._current_state.get(self._robot, "arm_joint") <= 0.15:
+                assert isinstance(action_space, CRVRobotActionSpace)
+                return (0, 0, 0, action_space.high[3], 0)
+            if self._current_plan is None:
+                self._current_plan = self._generate_plan(self._current_state)
+            return self._current_plan.pop(0)
+
+        def observe(self, x: ObjectCentricState) -> None:
+            self._current_state = x
+
+        def _calculate_grasp_point(self, state: ObjectCentricState) -> tuple[float, float]:
+            """Calculate the actual grasp point based on ratio parameter."""
+            grasp_ratio, _ = self._current_params
+            
+            # Get stick properties
+            stick_x = state.get(self._stick, "x")
+            stick_y = state.get(self._stick, "y")
+            stick_width = state.get(self._stick, "width")
+            stick_height = state.get(self._stick, "height")
+            
+            # Get robot gripper properties
+            gripper_width = state.get(self._robot, "gripper_width")
+
+            full_line_length = stick_width + 2 * gripper_width
+            line_length = full_line_length * grasp_ratio
+            side_ratio = gripper_width / full_line_length
+            bottom_ratio = stick_width / full_line_length
+
+            # Define the grasping line from left bottom to right bottom of stick
+            # Line starts at left edge and extends by gripper width on each side
+            left_x = stick_x - stick_width / 2
+            right_x = stick_x + stick_width / 2
+            bottom_y = stick_y - stick_height / 2
+            grasp_x: float = 0.0
+            grasp_y: float = 0.0
+
+            if grasp_ratio < side_ratio:  # Grasping from left side
+                grasp_x = left_x
+                grasp_y = bottom_y + (gripper_width - line_length)
+            elif side_ratio <= grasp_ratio < side_ratio + bottom_ratio:  # Grasping from bottom
+                grasp_x = left_x + (grasp_ratio - side_ratio) * full_line_length
+                grasp_y = bottom_y
+            else:  # Grasping from right side
+                grasp_x = right_x
+                grasp_y = bottom_y + (line_length - gripper_width - stick_width)
+            
+            return grasp_x, grasp_y
+
+        def _calculate_robot_position(self, state: ObjectCentricState, grasp_x: float, 
+                                      grasp_y: float) -> tuple[float, float, float]:
+            """Calculate robot position and orientation to reach grasp point."""
+            _, desired_arm_length = self._current_params
+            
+            # Get stick properties
+            stick_x = state.get(self._stick, "x")
+            stick_width = state.get(self._stick, "width")
+            
+            # Get robot properties
+            gripper_height = state.get(self._robot, "gripper_height")
+            
+            # Determine which side of the stick we're grasping from
+            stick_left = stick_x - stick_width / 2
+            stick_right = stick_x + stick_width / 2
+
+            robot_x: float = 0.0
+            robot_y: float = 0.0
+            robot_theta: float = 0.0
+            
+            if grasp_x < stick_left + stick_width * 0.01:  # Left side
+                robot_x = grasp_x - desired_arm_length - gripper_height
+                robot_y = grasp_y
+                robot_theta = 0.0  # Facing right
+            elif grasp_x > stick_right - stick_width * 0.01:  # Right side
+                robot_x = grasp_x + desired_arm_length + gripper_height
+                robot_y = grasp_y
+                robot_theta = np.pi  # Facing left
+            else:  # Bottom side
+                robot_x = grasp_x
+                robot_y = grasp_y - desired_arm_length - gripper_height
+                robot_theta = np.pi / 2  # Facing up
+            
+            return robot_x, robot_y, robot_theta
 
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[float, float, float, float]]:
             robot_x = state.get(self._robot, "x")
             robot_theta = state.get(self._robot, "theta")
-            robot_arm_joint = state.get(self._robot, "arm_joint")
-            stick_x = state.get(self._stick, "x")
-            target_x, target_y = get_robot_stick_grasp_position(
-                self._stick,
-                state,
-                stick_x,
-                robot_arm_joint,
-                relative_x_offset=self._current_params,
-            )
+            robot_radius = state.get(self._robot, "base_radius")
+            robot_gripper_height = state.get(self._robot, "gripper_height")
+            safe_y = robot_radius + robot_gripper_height * 2
+            
+            # Calculate grasp point and robot target position
+            grasp_x, grasp_y = self._calculate_grasp_point(state)
+            target_x, target_y, target_theta = self._calculate_robot_position(state, grasp_x, grasp_y)
+            _, desired_arm_length = self._current_params
+            
             return [
-                # Start by moving to safe height
-                (robot_x, self._safe_y, robot_theta, robot_arm_joint),
-                # Move to above the stick, offset by params
-                (target_x, self._safe_y, robot_theta, robot_arm_joint),
-                # Move down to grasp
-                (target_x, target_y, robot_theta, robot_arm_joint),
+                # Start by moving the arm inside the robot's base
+                (robot_x, safe_y, robot_theta, robot_radius),
+                # Start by moving to safe height with current orientation
+                (robot_x, safe_y, robot_theta, robot_radius),
+                # Move to target x position at safe height
+                (target_x, safe_y, robot_theta, robot_radius),
+                # Orient towards the stick
+                (target_x, safe_y, target_theta, robot_radius),
+                # Move down to grasp position
+                (target_x, target_y, target_theta, robot_radius),
+                # Extend arm to desired length
+                (target_x, target_y, target_theta, desired_arm_length),
             ]
 
-        def _get_vacuum_actions(self) -> float:
-            return 0.0, 1.0
+        def _waypoints_to_plan(
+            self,
+            state: ObjectCentricState,
+            waypoints: list[tuple[float, float, float, float]],
+            vacuum_during_plan: float,
+        ) -> list[NDArray[np.float32]]:
+            current_pos = (
+                state.get(self._robot, "x"),
+                state.get(self._robot, "y"),
+                state.get(self._robot, "theta"),
+                state.get(self._robot, "arm_joint")
+            )
+            waypoints = [current_pos] + waypoints
+            plan: list[NDArray[np.float32]] = []
+            for start, end in zip(waypoints[:-1], waypoints[1:]):
+                if np.allclose(start, end):
+                    continue
+                total_dx = end[0] - start[0]
+                total_dy = end[1] - start[1]
+                total_dtheta = end[2] - start[2]
+                total_darm = end[3] - start[3]
+                num_steps = int(
+                    max(
+                        np.ceil(abs(total_dx) / self._max_delta_x),
+                        np.ceil(abs(total_dy) / self._max_delta_y),
+                        np.ceil(abs(total_dtheta) / self._max_delta_theta),
+                        np.ceil(abs(total_darm) / self._max_delta_arm),
+                    )
+                )
+                dx = total_dx / num_steps
+                dy = total_dy / num_steps
+                dtheta = total_dtheta / num_steps
+                darm = total_darm / num_steps
+                action = np.array([dx, dy, dtheta, darm, vacuum_during_plan], dtype=np.float32)
+                for _ in range(num_steps):
+                    plan.append(action)
+
+            return plan
+
+        def _generate_plan(self, x: ObjectCentricState) -> list[NDArray[np.float32]]:
+            waypoints = self._generate_waypoints(x)
+            vacuum_during_plan = 0.0  # Vacuum OFF during movement
+            vacuum_after_plan = 1.0   # Vacuum ON after reaching grasp position
+            waypoint_plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
+            assert isinstance(action_space, CRVRobotActionSpace)
+            plan_suffix: list[NDArray[np.float32]] = [
+                # Change the vacuum to grasp
+                np.array([0, 0, 0, 0, vacuum_after_plan], dtype=np.float32),
+            ]
+            return waypoint_plan + plan_suffix
 
     class GroundPlaceStickController(_CommonGroundController):
         """Controller for releasing the stick."""
@@ -523,7 +680,7 @@ def create_bilevel_planning_models(
             self, state: ObjectCentricState
         ) -> list[tuple[float, float, float, float]]:
             robot_theta = state.get(self._robot, "theta")
-            robot_arm_joint = state.get(self._robot, "arm_joint")
+            robot_radius = state.get(self._robot, "base_radius")
             button_x = state.get(self._button, "x")
             button_y = state.get(self._button, "y")
 
@@ -534,7 +691,7 @@ def create_bilevel_planning_models(
 
             return [
                 # Move down so robot base overlaps with button
-                (target_x, target_y, robot_theta, robot_arm_joint),
+                (target_x, target_y, robot_theta, robot_radius),
             ]
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
@@ -555,7 +712,7 @@ def create_bilevel_planning_models(
         ) -> list[tuple[float, float, float, float]]:
             robot_x = state.get(self._robot, "x")
             robot_theta = state.get(self._robot, "theta")
-            robot_arm_joint = state.get(self._robot, "arm_joint")
+            robot_arm_joint = state.get(self._robot, "base_radius")
             button_x = state.get(self._button, "x")
             button_y = state.get(self._button, "y")
             stick_height = state.get(self._stick, "height")
@@ -650,24 +807,3 @@ def create_bilevel_planning_models(
         goal_deriver,
         skills,
     )
-
-
-def get_robot_stick_grasp_position(
-    stick: Object,
-    state: ObjectCentricState,
-    stick_x: float,
-    robot_arm_joint: float,
-    relative_x_offset: float = 0,
-) -> tuple[float, float]:
-    """Get the x, y position that the robot should be at to grasp the stick."""
-    robot = state.get_objects(CRVRobotType)[0]
-    padding = 1e-4
-    x = stick_x + relative_x_offset
-    y = (
-        state.get(stick, "y")
-        + state.get(stick, "height") / 2
-        + robot_arm_joint
-        + state.get(robot, "gripper_width") / 2
-        + padding
-    )
-    return (x, y)
