@@ -1,12 +1,14 @@
 """Tests for stickbutton2d.py."""
 
+import time
+
+import imageio.v2 as iio
 import numpy as np
 import prbench
 import pytest
 from conftest import MAKE_VIDEOS
 from gymnasium.wrappers import RecordVideo
 from prbench.envs.stickbutton2d import StickButton2DEnvSpec
-from geom2drobotenvs.object_types import CircleType, CRVRobotType, RectangleType
 
 from prbench_bilevel_planning.agent import BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
@@ -27,7 +29,6 @@ def test_stickbutton2d_observation_to_state():
     assert env_models.state_space.contains(state)
     assert env_models.observation_space == env.observation_space
     env.close()
-
 
 
 def test_stickbutton2d_transition_fn():
@@ -218,8 +219,6 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=Fa
 
         # Uncomment to debug.
         if debug:
-            import imageio.v2 as iio
-            import time
             img = env.render()
             iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
 
@@ -268,12 +267,12 @@ def test_stickbutton2d_skills():
     reset_options = {"init_state": state1}
     obs1, _ = env.reset(seed=123, options=reset_options)
     robot_press_button_from_nothing = RobotPressButtonFromNothing.ground(
-        (robot, button3))
-    obs2 = _skill_test_helper(
-        robot_press_button_from_nothing, env_models, env, obs1
+        (robot, button3)
     )
+    obs2 = _skill_test_helper(robot_press_button_from_nothing, env_models, env, obs1)
     robot_press_button_from_button = RobotPressButtonFromButton.ground(
-        (robot, button2, button3))
+        (robot, button2, button3)
+    )
     obs3 = _skill_test_helper(
         robot_press_button_from_button,
         env_models,
@@ -317,9 +316,7 @@ def test_stickbutton2d_skills():
     # img = env.render()
     # iio.imsave(f"debug/0.png", img)
     direct_press_button1 = RobotPressButtonFromNothing.ground((robot, button4))
-    obs2 = _skill_test_helper(
-        direct_press_button1, env_models, env, obs1
-    )
+    obs2 = _skill_test_helper(direct_press_button1, env_models, env, obs1)
     # Uncomment to debug.
     # img = env.render()
     # iio.imsave(f"debug/1.png", img)
@@ -342,7 +339,10 @@ def test_stickbutton2d_skills():
 
     # # Now press button4 with stick
     obs4 = _skill_test_helper(
-        StickPressButtonFromNothing.ground((robot, stick, button4)), env_models, env, obs3
+        StickPressButtonFromNothing.ground((robot, stick, button4)),
+        env_models,
+        env,
+        obs3,
     )
     # img = env.render()
     # iio.imsave(f"debug/3.png", img)

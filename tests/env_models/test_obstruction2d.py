@@ -40,7 +40,7 @@ def test_obstruction2d_transition_fn():
     transition_fn = env_models.transition_fn
     obs, _ = env.reset(seed=123)
     state = env_models.observation_to_state(obs)
-    for i in range(100):
+    for _ in range(100):
         action = env.action_space.sample()
         obs, _, _, _, _ = env.step(action)
         next_state = env_models.observation_to_state(obs)

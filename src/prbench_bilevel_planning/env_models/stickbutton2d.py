@@ -17,13 +17,12 @@ from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
 )
-from gymnasium.spaces import Box, Space
+from gymnasium.spaces import Space
 from numpy.typing import NDArray
 from prbench.envs.stickbutton2d import (
     ObjectCentricStickButton2DEnv,
     StickButton2DEnvSpec,
 )
-from prpl_utils.spaces import FunctionalSpace
 from relational_structs import (
     GroundAtom,
     LiftedAtom,
@@ -37,7 +36,6 @@ from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateS
 from tomsgeoms2d.structs import Circle, Geom2D, Rectangle
 
 
-
 def object_to_geom(obj: Object, state: ObjectCentricState) -> Geom2D:
     """Convert an object to its geometric representation."""
     if obj.is_instance(CRVRobotType):
@@ -46,7 +44,7 @@ def object_to_geom(obj: Object, state: ObjectCentricState) -> Geom2D:
         y = state.get(obj, "y")
         radius = state.get(obj, "base_radius")
         return Circle(x, y, radius)
-    elif obj.is_instance(RectangleType):
+    if obj.is_instance(RectangleType):
         # Stick is a rectangle
         x = state.get(obj, "x")
         y = state.get(obj, "y")
@@ -54,14 +52,14 @@ def object_to_geom(obj: Object, state: ObjectCentricState) -> Geom2D:
         width = state.get(obj, "width")
         height = state.get(obj, "height")
         return Rectangle(x, y, width, height, theta)
-    elif obj.is_instance(CircleType):
+    if obj.is_instance(CircleType):
         # Button is a circle
         x = state.get(obj, "x")
         y = state.get(obj, "y")
         radius = state.get(obj, "radius")
         return Circle(x, y, radius)
-    else:
-        raise ValueError(f"Unknown object type: {obj.type}")
+
+    raise ValueError(f"Unknown object type: {obj.type}")
 
 
 def create_bilevel_planning_models(
@@ -81,10 +79,6 @@ def create_bilevel_planning_models(
     def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
         """Convert the vectors back into (hashable) object-centric states."""
         return observation_space.devectorize(o)
-
-    def state_to_observation(x: ObjectCentricState) -> NDArray[np.float32]:
-        """Convert the object-centric state into a vector."""
-        return observation_space.vectorize(x)
 
     # The object-centric states that are passed around in planning do not include the
     # globally constant objects, so we need to create an exemplar state that does
@@ -115,7 +109,6 @@ def create_bilevel_planning_models(
 
     # Create the state space.
     state_space = ObjectCentricStateSpace(types)
-
 
     # Predicates.
     Grasped = Predicate("Grasped", [CRVRobotType, RectangleType])
@@ -216,9 +209,7 @@ def create_bilevel_planning_models(
         add_effects={
             LiftedAtom(Pressed, [button]),
         },
-        delete_effects={
-            LiftedAtom(AboveNoButton, [])
-        }
+        delete_effects={LiftedAtom(AboveNoButton, [])},
     )
 
     # RobotPressButtonFromButton
@@ -322,7 +313,7 @@ def create_bilevel_planning_models(
             assert self._robot.is_instance(CRVRobotType)
             super().__init__(objects)
             self._current_params: float = 0.0
-            self._current_plan: list[tuple[float, ...]] | None = None
+            self._current_plan: list[NDArray[np.float32]] | None = None
             self._current_state: ObjectCentricState | None = None
             self._safe_y = safe_y
             # Extract max deltas from action space bounds
@@ -339,7 +330,7 @@ def create_bilevel_planning_models(
             """Generate a waypoint plan with x, y, theta, arm values."""
 
         @abc.abstractmethod
-        def _get_vacuum_actions(self) -> float:
+        def _get_vacuum_actions(self) -> tuple[float, float]:
             """Get vacuum actions for during and after waypoint movement."""
 
         def _waypoints_to_plan(
@@ -352,7 +343,7 @@ def create_bilevel_planning_models(
                 state.get(self._robot, "x"),
                 state.get(self._robot, "y"),
                 state.get(self._robot, "theta"),
-                state.get(self._robot, "arm_joint")
+                state.get(self._robot, "arm_joint"),
             )
             waypoints = [current_pos] + waypoints
             plan: list[NDArray[np.float32]] = []
@@ -375,7 +366,9 @@ def create_bilevel_planning_models(
                 dy = total_dy / num_steps
                 dtheta = total_dtheta / num_steps
                 darm = total_darm / num_steps
-                action = np.array([dx, dy, dtheta, darm, vacuum_during_plan], dtype=np.float32)
+                action = np.array(
+                    [dx, dy, dtheta, darm, vacuum_during_plan], dtype=np.float32
+                )
                 for _ in range(num_steps):
                     plan.append(action)
 
@@ -389,7 +382,7 @@ def create_bilevel_planning_models(
         def terminated(self) -> bool:
             return self._current_plan is not None and len(self._current_plan) == 0
 
-        def step(self) -> tuple[float, ...]:
+        def step(self) -> NDArray[np.float32]:
             assert self._current_state is not None
             if self._current_plan is None:
                 self._current_plan = self._generate_plan(self._current_state)
@@ -446,7 +439,7 @@ def create_bilevel_planning_models(
         def terminated(self) -> bool:
             return self._current_plan is not None and len(self._current_plan) == 0
 
-        def step(self) -> tuple[float, ...]:
+        def step(self) -> NDArray[np.float32]:
             # Always extend the arm first before planning
             assert self._current_state is not None
             if self._current_plan is None:
@@ -456,15 +449,17 @@ def create_bilevel_planning_models(
         def observe(self, x: ObjectCentricState) -> None:
             self._current_state = x
 
-        def _calculate_grasp_point(self, state: ObjectCentricState) -> tuple[float, float]:
+        def _calculate_grasp_point(
+            self, state: ObjectCentricState
+        ) -> tuple[float, float]:
             """Calculate the actual grasp point based on ratio parameter."""
             grasp_ratio, _ = self._current_params
-            
+
             # Get stick properties
             stick_x = state.get(self._stick, "x")
             stick_y = state.get(self._stick, "y")
             stick_width = state.get(self._stick, "width")
-            
+
             # Get robot gripper properties
             gripper_height = state.get(self._robot, "gripper_height")
 
@@ -484,27 +479,30 @@ def create_bilevel_planning_models(
             if grasp_ratio < side_ratio:  # Grasping from left side
                 grasp_x = left_x
                 grasp_y = bottom_y + (gripper_height - line_length)
-            elif side_ratio <= grasp_ratio < side_ratio + bottom_ratio:  # Grasping from bottom
+            elif (
+                side_ratio <= grasp_ratio < side_ratio + bottom_ratio
+            ):  # Grasping from bottom
                 grasp_x = left_x + (grasp_ratio - side_ratio) * full_line_length
                 grasp_y = bottom_y
             else:  # Grasping from right side
                 grasp_x = right_x
                 grasp_y = bottom_y + (line_length - gripper_height - stick_width)
-            
+
             return grasp_x, grasp_y
 
-        def _calculate_robot_position(self, state: ObjectCentricState, grasp_x: float, 
-                                      grasp_y: float) -> tuple[float, float, float]:
+        def _calculate_robot_position(
+            self, state: ObjectCentricState, grasp_x: float, grasp_y: float
+        ) -> tuple[float, float, float]:
             """Calculate robot position and orientation to reach grasp point."""
             _, desired_arm_length = self._current_params
-            
+
             # Get stick properties
             stick_x = state.get(self._stick, "x")
             stick_width = state.get(self._stick, "width")
-            
+
             # Get robot properties
             gripper_width = state.get(self._robot, "gripper_width")
-            
+
             # Determine which side of the stick we're grasping from
             stick_left = stick_x
             stick_right = stick_x + stick_width
@@ -512,7 +510,7 @@ def create_bilevel_planning_models(
             robot_x: float = 0.0
             robot_y: float = 0.0
             robot_theta: float = 0.0
-            
+
             if grasp_x < stick_left + stick_width * 0.01:  # Left side
                 robot_x = grasp_x - desired_arm_length - gripper_width
                 robot_y = grasp_y
@@ -525,7 +523,7 @@ def create_bilevel_planning_models(
                 robot_x = grasp_x
                 robot_y = grasp_y - desired_arm_length - gripper_width
                 robot_theta = np.pi / 2  # Facing up
-            
+
             return robot_x, robot_y, robot_theta
 
         def _generate_waypoints(
@@ -536,12 +534,14 @@ def create_bilevel_planning_models(
             robot_radius = state.get(self._robot, "base_radius")
             robot_gripper_width = state.get(self._robot, "gripper_width")
             safe_y = robot_radius + robot_gripper_width * 2
-            
+
             # Calculate grasp point and robot target position
             grasp_x, grasp_y = self._calculate_grasp_point(state)
-            target_x, target_y, target_theta = self._calculate_robot_position(state, grasp_x, grasp_y)
+            target_x, target_y, target_theta = self._calculate_robot_position(
+                state, grasp_x, grasp_y
+            )
             _, desired_arm_length = self._current_params
-            
+
             return [
                 # Start by moving the arm inside the robot's base
                 (robot_x, safe_y, robot_theta, robot_radius),
@@ -567,7 +567,7 @@ def create_bilevel_planning_models(
                 state.get(self._robot, "x"),
                 state.get(self._robot, "y"),
                 state.get(self._robot, "theta"),
-                state.get(self._robot, "arm_joint")
+                state.get(self._robot, "arm_joint"),
             )
             waypoints = [current_pos] + waypoints
             plan: list[NDArray[np.float32]] = []
@@ -590,7 +590,9 @@ def create_bilevel_planning_models(
                 dy = total_dy / num_steps
                 dtheta = total_dtheta / num_steps
                 darm = total_darm / num_steps
-                action = np.array([dx, dy, dtheta, darm, vacuum_during_plan], dtype=np.float32)
+                action = np.array(
+                    [dx, dy, dtheta, darm, vacuum_during_plan], dtype=np.float32
+                )
                 for _ in range(num_steps):
                     plan.append(action)
 
@@ -599,7 +601,7 @@ def create_bilevel_planning_models(
         def _generate_plan(self, x: ObjectCentricState) -> list[NDArray[np.float32]]:
             waypoints = self._generate_waypoints(x)
             vacuum_during_plan = 0.0  # Vacuum OFF during movement
-            vacuum_after_plan = 1.0   # Vacuum ON after reaching grasp position
+            vacuum_after_plan = 1.0  # Vacuum ON after reaching grasp position
             waypoint_plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
             assert isinstance(action_space, CRVRobotActionSpace)
             plan_suffix: list[NDArray[np.float32]] = [
@@ -636,7 +638,7 @@ def create_bilevel_planning_models(
                 (robot_x, robot_y, robot_theta, robot_base_radius),
             ]
 
-        def _get_vacuum_actions(self) -> float:
+        def _get_vacuum_actions(self) -> tuple[float, float]:
             return 0.0, 0.0
 
     class GroundRobotPressButtonController(_CommonGroundController):
@@ -652,7 +654,7 @@ def create_bilevel_planning_models(
         ) -> float:
             del x, rng  # not used in this controller
             return 0.0
-        
+
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[float, float, float, float]]:
@@ -689,24 +691,20 @@ def create_bilevel_planning_models(
         ) -> float:
             del x, rng  # not used in this controller
             return 0.0
-        
+
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[float, float, float, float]]:
-            """
-            Assume we always use the stick far end to press the button.
-            """
+            """Assume we always use the stick far end to press the button."""
             robot_x = state.get(self._robot, "x")
             robot_y = state.get(self._robot, "y")
             robot_theta = state.get(self._robot, "theta")
             robot_arm_joint = state.get(self._robot, "arm_joint")
             button_x = state.get(self._button, "x")
             button_y = state.get(self._button, "y")
-            stick_far_x = state.get(self._stick, "x") + \
-                state.get(self._stick, "width")
-            stick_far_y = state.get(self._stick, "y") + \
-                state.get(self._stick, "height")
-            
+            stick_far_x = state.get(self._stick, "x") + state.get(self._stick, "width")
+            stick_far_y = state.get(self._stick, "y") + state.get(self._stick, "height")
+
             dx = button_x - stick_far_x
             dy = button_y - stick_far_y
 
@@ -777,10 +775,18 @@ def create_bilevel_planning_models(
         LiftedSkill(PickStickFromNothingOperator, PickStickFromNothingController),
         LiftedSkill(PickStickFromButtonOperator, PickStickFromButtonController),
         LiftedSkill(PlaceStickOperator, PlaceStickController),
-        LiftedSkill(RobotPressButtonFromNothingOperator, RobotPressButtonFromNothingController),
-        LiftedSkill(RobotPressButtonFromButtonOperator, RobotPressButtonFromButtonController),
-        LiftedSkill(StickPressButtonFromNothingOperator, StickPressButtonFromNothingController),
-        LiftedSkill(StickPressButtonFromButtonOperator, StickPressButtonFromButtonController),
+        LiftedSkill(
+            RobotPressButtonFromNothingOperator, RobotPressButtonFromNothingController
+        ),
+        LiftedSkill(
+            RobotPressButtonFromButtonOperator, RobotPressButtonFromButtonController
+        ),
+        LiftedSkill(
+            StickPressButtonFromNothingOperator, StickPressButtonFromNothingController
+        ),
+        LiftedSkill(
+            StickPressButtonFromButtonOperator, StickPressButtonFromButtonController
+        ),
     }
 
     # Finalize the models.
