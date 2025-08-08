@@ -393,11 +393,7 @@ def create_bilevel_planning_models(
             return self._current_plan is not None and len(self._current_plan) == 0
 
         def step(self) -> tuple[float, ...]:
-            # Always extend the arm first before planning (same as obstruction2d)
             assert self._current_state is not None
-            if self._current_state.get(self._robot, "arm_joint") <= 0.15:
-                assert isinstance(action_space, CRVRobotActionSpace)
-                return (0, 0, 0, action_space.high[3], 0)
             if self._current_plan is None:
                 self._current_plan = self._generate_plan(self._current_state)
             return self._current_plan.pop(0)
@@ -441,7 +437,8 @@ def create_bilevel_planning_models(
             # Sample grasp ratio along the stick [0,1] and desired arm length
             grasp_ratio = rng.uniform(0.0, 1.0)
             max_arm_length = x.get(self._robot, "arm_length")
-            arm_length = rng.uniform(0.0, max_arm_length)
+            min_arm_length = x.get(self._robot, "base_radius")
+            arm_length = rng.uniform(min_arm_length, max_arm_length)
             return (grasp_ratio, arm_length)
 
         def reset(self, x: ObjectCentricState, params: tuple[float, float]) -> None:
@@ -455,9 +452,6 @@ def create_bilevel_planning_models(
         def step(self) -> tuple[float, ...]:
             # Always extend the arm first before planning
             assert self._current_state is not None
-            if self._current_state.get(self._robot, "arm_joint") <= 0.15:
-                assert isinstance(action_space, CRVRobotActionSpace)
-                return (0, 0, 0, action_space.high[3], 0)
             if self._current_plan is None:
                 self._current_plan = self._generate_plan(self._current_state)
             return self._current_plan.pop(0)
@@ -473,33 +467,32 @@ def create_bilevel_planning_models(
             stick_x = state.get(self._stick, "x")
             stick_y = state.get(self._stick, "y")
             stick_width = state.get(self._stick, "width")
-            stick_height = state.get(self._stick, "height")
             
             # Get robot gripper properties
-            gripper_width = state.get(self._robot, "gripper_width")
+            gripper_height = state.get(self._robot, "gripper_height")
 
-            full_line_length = stick_width + 2 * gripper_width
+            full_line_length = stick_width + 2 * gripper_height
             line_length = full_line_length * grasp_ratio
-            side_ratio = gripper_width / full_line_length
+            side_ratio = gripper_height / full_line_length
             bottom_ratio = stick_width / full_line_length
 
             # Define the grasping line from left bottom to right bottom of stick
             # Line starts at left edge and extends by gripper width on each side
-            left_x = stick_x - stick_width / 2
-            right_x = stick_x + stick_width / 2
-            bottom_y = stick_y - stick_height / 2
+            left_x = stick_x
+            right_x = stick_x + stick_width
+            bottom_y = stick_y
             grasp_x: float = 0.0
             grasp_y: float = 0.0
 
             if grasp_ratio < side_ratio:  # Grasping from left side
                 grasp_x = left_x
-                grasp_y = bottom_y + (gripper_width - line_length)
+                grasp_y = bottom_y + (gripper_height - line_length)
             elif side_ratio <= grasp_ratio < side_ratio + bottom_ratio:  # Grasping from bottom
                 grasp_x = left_x + (grasp_ratio - side_ratio) * full_line_length
                 grasp_y = bottom_y
             else:  # Grasping from right side
                 grasp_x = right_x
-                grasp_y = bottom_y + (line_length - gripper_width - stick_width)
+                grasp_y = bottom_y + (line_length - gripper_height - stick_width)
             
             return grasp_x, grasp_y
 
@@ -513,27 +506,27 @@ def create_bilevel_planning_models(
             stick_width = state.get(self._stick, "width")
             
             # Get robot properties
-            gripper_height = state.get(self._robot, "gripper_height")
+            gripper_width = state.get(self._robot, "gripper_width")
             
             # Determine which side of the stick we're grasping from
-            stick_left = stick_x - stick_width / 2
-            stick_right = stick_x + stick_width / 2
+            stick_left = stick_x
+            stick_right = stick_x + stick_width
 
             robot_x: float = 0.0
             robot_y: float = 0.0
             robot_theta: float = 0.0
             
             if grasp_x < stick_left + stick_width * 0.01:  # Left side
-                robot_x = grasp_x - desired_arm_length - gripper_height
+                robot_x = grasp_x - desired_arm_length - gripper_width
                 robot_y = grasp_y
                 robot_theta = 0.0  # Facing right
             elif grasp_x > stick_right - stick_width * 0.01:  # Right side
-                robot_x = grasp_x + desired_arm_length + gripper_height
+                robot_x = grasp_x + desired_arm_length + gripper_width
                 robot_y = grasp_y
                 robot_theta = np.pi  # Facing left
             else:  # Bottom side
                 robot_x = grasp_x
-                robot_y = grasp_y - desired_arm_length - gripper_height
+                robot_y = grasp_y - desired_arm_length - gripper_width
                 robot_theta = np.pi / 2  # Facing up
             
             return robot_x, robot_y, robot_theta
@@ -544,8 +537,8 @@ def create_bilevel_planning_models(
             robot_x = state.get(self._robot, "x")
             robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
-            robot_gripper_height = state.get(self._robot, "gripper_height")
-            safe_y = robot_radius + robot_gripper_height * 2
+            robot_gripper_width = state.get(self._robot, "gripper_width")
+            safe_y = robot_radius + robot_gripper_width * 2
             
             # Calculate grasp point and robot target position
             grasp_x, grasp_y = self._calculate_grasp_point(state)

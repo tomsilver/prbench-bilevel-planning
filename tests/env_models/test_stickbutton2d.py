@@ -209,8 +209,7 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=Fa
     controller.reset(state, params)
     for _ in range(100):
         action = controller.step()
-        executable = np.array(action, dtype=np.float32)
-        obs, _, _, _, _ = env.step(executable)
+        obs, _, _, _, _ = env.step(action)
         next_state = env_models.observation_to_state(obs)
         controller.observe(next_state)
         # Comment out exact transition matching due to floating point precision issues
@@ -342,13 +341,13 @@ def test_stickbutton2d_skills():
     assert Grasped([robot, stick]) in abstract_state3.atoms
 
     # # Now press button0 with stick
-    # obs4 = _skill_test_helper(
-    #     StickPressButtonFromNothing.ground((robot, stick, button0)), env_models, env, obs3
-    # )
-    # # Check that button0 is pressed
-    # state4 = env_models.observation_to_state(obs4)
-    # abstract_state4 = env_models.state_abstractor(state4)
-    # assert Pressed([button0]) in abstract_state4.atoms
+    obs4 = _skill_test_helper(
+        StickPressButtonFromNothing.ground((robot, stick, button0)), env_models, env, obs3
+    )
+    # Check that button0 is pressed
+    state4 = env_models.observation_to_state(obs4)
+    abstract_state4 = env_models.state_abstractor(state4)
+    assert Pressed([button0]) in abstract_state4.atoms
 
     # # Now press button1 with stick
     # obs5 = _skill_test_helper(
