@@ -313,9 +313,9 @@ def test_stickbutton2d_skills():
     obs1, _ = env.reset(seed=123, options=reset_options)
     # First try to directly press button4
     # Uncomment to debug.
-    import imageio.v2 as iio
-    img = env.render()
-    iio.imsave(f"debug/0.png", img)
+    # import imageio.v2 as iio
+    # img = env.render()
+    # iio.imsave(f"debug/0.png", img)
     direct_press_button1 = RobotPressButtonFromNothing.ground((robot, button4))
     obs2 = _skill_test_helper(
         direct_press_button1, env_models, env, obs1
@@ -344,8 +344,8 @@ def test_stickbutton2d_skills():
     obs4 = _skill_test_helper(
         StickPressButtonFromNothing.ground((robot, stick, button4)), env_models, env, obs3
     )
-    img = env.render()
-    iio.imsave(f"debug/3.png", img)
+    # img = env.render()
+    # iio.imsave(f"debug/3.png", img)
     # Check that button4 is pressed
     state4 = env_models.observation_to_state(obs4)
     abstract_state4 = env_models.state_abstractor(state4)
@@ -377,8 +377,8 @@ def test_stickbutton2d_skills():
 @pytest.mark.parametrize(
     "num_buttons, max_abstract_plans, samples_per_step",
     [
-        (1, 10, 1),
-        (5, 10, 1),
+        (1, 5, 10),
+        (5, 100, 10),
     ],
 )
 def test_stickbutton2d_bilevel_planning(
