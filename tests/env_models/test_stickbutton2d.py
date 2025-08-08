@@ -311,62 +311,67 @@ def test_stickbutton2d_skills():
     state1.set(button4, "y", ontable_y)
     reset_options = {"init_state": state1}
     obs1, _ = env.reset(seed=123, options=reset_options)
-    # First try to directly press button0
+    # First try to directly press button4
     # Uncomment to debug.
     import imageio.v2 as iio
     img = env.render()
     iio.imsave(f"debug/0.png", img)
-    direct_press_button1 = RobotPressButtonFromNothing.ground((robot, button1))
+    direct_press_button1 = RobotPressButtonFromNothing.ground((robot, button4))
     obs2 = _skill_test_helper(
         direct_press_button1, env_models, env, obs1
     )
     # Uncomment to debug.
-    img = env.render()
-    iio.imsave(f"debug/1.png", img)
-    # Check that button0 is not pressed
+    # img = env.render()
+    # iio.imsave(f"debug/1.png", img)
+    # Check that button4 is not pressed
     state2 = env_models.observation_to_state(obs2)
     abstract_state2 = env_models.state_abstractor(state2)
-    assert Pressed([button0]) not in abstract_state2.atoms
-    # Now try to press button0 with stick
+    assert Pressed([button4]) not in abstract_state2.atoms
+    # Now try to press button4 with stick
     obs3 = _skill_test_helper(
-        PickStickFromNothing.ground((robot, stick)), env_models, env, obs2, debug=True
+        PickStickFromNothing.ground((robot, stick)), env_models, env, obs2
     )
     # Check that stick is grasped
     # Uncomment to debug.
-    img = env.render()
-    iio.imsave(f"debug/2.png", img)
+    # img = env.render()
+    # iio.imsave(f"debug/2.png", img)
     state3 = env_models.observation_to_state(obs3)
     abstract_state3 = env_models.state_abstractor(state3)
     Grasped = pred_name_to_pred["Grasped"]
     assert Grasped([robot, stick]) in abstract_state3.atoms
 
-    # # Now press button0 with stick
+    # # Now press button4 with stick
     obs4 = _skill_test_helper(
-        StickPressButtonFromNothing.ground((robot, stick, button0)), env_models, env, obs3
+        StickPressButtonFromNothing.ground((robot, stick, button4)), env_models, env, obs3
     )
-    # Check that button0 is pressed
+    img = env.render()
+    iio.imsave(f"debug/3.png", img)
+    # Check that button4 is pressed
     state4 = env_models.observation_to_state(obs4)
     abstract_state4 = env_models.state_abstractor(state4)
-    assert Pressed([button0]) in abstract_state4.atoms
+    assert Pressed([button4]) in abstract_state4.atoms
 
     # # Now press button1 with stick
-    # obs5 = _skill_test_helper(
-    #     StickPressButtonFromButton.ground((robot, stick, button1, button0)),
-    #     env_models,
-    #     env,
-    #     obs4,
-    # )
-    # # Check that button1 is pressed
-    # state5 = env_models.observation_to_state(obs5)
-    # abstract_state5 = env_models.state_abstractor(state5)
-    # assert Pressed([button1]) in abstract_state5.atoms
-
+    obs5 = _skill_test_helper(
+        StickPressButtonFromButton.ground((robot, stick, button1, button4)),
+        env_models,
+        env,
+        obs4,
+    )
+    # Check that button1 is pressed
+    state5 = env_models.observation_to_state(obs5)
+    abstract_state5 = env_models.state_abstractor(state5)
+    assert Pressed([button1]) in abstract_state5.atoms
+    # img = env.render()
+    # iio.imsave(f"debug/4.png", img)
     # # Finally Place the stick
-    # obs6 = _skill_test_helper(PlaceStick.ground((robot, stick)), env_models, env, obs5)
-    # # Check that the robot is no longer grasping the stick
-    # state6 = env_models.observation_to_state(obs6)
-    # abstract_state6 = env_models.state_abstractor(state6)
-    # assert Grasped([robot, stick]) not in abstract_state6.atoms
+    obs6 = _skill_test_helper(PlaceStick.ground((robot, stick)), env_models, env, obs5)
+    # Check that the robot is no longer grasping the stick
+    state6 = env_models.observation_to_state(obs6)
+    abstract_state6 = env_models.state_abstractor(state6)
+    assert Grasped([robot, stick]) not in abstract_state6.atoms
+    # img = env.render()
+    # iio.imsave(f"debug/5.png", img)
 
 
 @pytest.mark.parametrize(

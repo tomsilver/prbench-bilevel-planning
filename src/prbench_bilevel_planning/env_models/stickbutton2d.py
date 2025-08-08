@@ -53,7 +53,7 @@ def object_to_geom(obj: Object, state: ObjectCentricState) -> Geom2D:
         theta = state.get(obj, "theta")
         width = state.get(obj, "width")
         height = state.get(obj, "height")
-        return Rectangle(x, y, theta, width, height)
+        return Rectangle(x, y, width, height, theta)
     elif obj.is_instance(CircleType):
         # Button is a circle
         x = state.get(obj, "x")
@@ -136,12 +136,9 @@ def create_bilevel_planning_models(
     # State abstractor.
     def state_abstractor(x: ObjectCentricState) -> RelationalAbstractState:
         """Get the abstract state for the current state."""
-        robot = Object("robot", CRVRobotType)
-        stick = Object("stick", RectangleType)
-        buttons: set[Object] = set()
-        for i in range(num_buttons):
-            button = Object(f"button{i}", CircleType)
-            buttons.add(button)
+        robot = x.get_objects(CRVRobotType)[0]
+        stick = x.get_objects(RectangleType)[0]
+        buttons = x.get_objects(CircleType)
 
         atoms: set[GroundAtom] = set()
 
@@ -189,7 +186,7 @@ def create_bilevel_planning_models(
         if not robot_above_any_button and not stick_above_any_button:
             atoms.add(GroundAtom(AboveNoButton, []))
 
-        objects = {robot, stick} | buttons
+        objects = {robot, stick} | set(buttons)
         return RelationalAbstractState(atoms, objects)
 
     # Goal abstractor.
@@ -623,37 +620,24 @@ def create_bilevel_planning_models(
             self, x: ObjectCentricState, rng: np.random.Generator
         ) -> float:
             # Parameter represents absolute x position where to release the stick
-            world_min_x = 0.5
-            world_max_x = 3.0
-            return rng.uniform(world_min_x, world_max_x)
+            del x, rng  # not used in this controller
+            return 0.0
 
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[float, float, float, float]]:
             robot_x = state.get(self._robot, "x")
+            robot_y = state.get(self._robot, "y")
+            robot_base_radius = state.get(self._robot, "base_radius")
             robot_theta = state.get(self._robot, "theta")
-            robot_arm_joint = state.get(self._robot, "arm_joint")
-
-            # Move to release position
-            release_x = self._current_params
-            release_y = 1.5  # Place on table level
-            target_y = (
-                release_y
-                + robot_arm_joint
-                + state.get(self._robot, "gripper_width") / 2
-            )
 
             return [
-                # Start by moving to safe height
-                (robot_x, self._safe_y, robot_theta, robot_arm_joint),
-                # Move to release position
-                (release_x, self._safe_y, robot_theta, robot_arm_joint),
-                # Move down to place
-                (release_x, target_y, robot_theta, robot_arm_joint),
+                # Just move the arm back
+                (robot_x, robot_y, robot_theta, robot_base_radius),
             ]
 
         def _get_vacuum_actions(self) -> float:
-            return 1.0, 0.0
+            return 0.0, 0.0
 
     class GroundRobotPressButtonController(_CommonGroundController):
         """Controller for pressing a button directly with the robot."""
@@ -700,26 +684,38 @@ def create_bilevel_planning_models(
             assert self._stick.is_instance(RectangleType)
             assert self._button.is_instance(CircleType)
 
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> float:
+            del x, rng  # not used in this controller
+            return 0.0
+        
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[float, float, float, float]]:
+            """
+            Assume we always use the stick far end to press the button.
+            """
             robot_x = state.get(self._robot, "x")
+            robot_y = state.get(self._robot, "y")
             robot_theta = state.get(self._robot, "theta")
-            robot_arm_joint = state.get(self._robot, "base_radius")
+            robot_arm_joint = state.get(self._robot, "arm_joint")
             button_x = state.get(self._button, "x")
             button_y = state.get(self._button, "y")
-            stick_height = state.get(self._stick, "height")
+            stick_far_x = state.get(self._stick, "x") + \
+                state.get(self._stick, "width")
+            stick_far_y = state.get(self._stick, "y") + \
+                state.get(self._stick, "height")
+            
+            dx = button_x - stick_far_x
+            dy = button_y - stick_far_y
 
             # Position robot so stick can reach button
             # Account for stick length and robot arm extension
-            target_x = button_x - stick_height / 2
-            target_y = button_y + robot_arm_joint
+            target_x = robot_x + dx
+            target_y = robot_y + dy
 
             return [
-                # Start by moving to safe height
-                (robot_x, self._safe_y, robot_theta, robot_arm_joint),
-                # Move to position where stick can reach button
-                (target_x, self._safe_y, robot_theta, robot_arm_joint),
                 # Move down to press button with stick
                 (target_x, target_y, robot_theta, robot_arm_joint),
             ]
