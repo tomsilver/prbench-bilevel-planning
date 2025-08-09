@@ -1,6 +1,7 @@
 """Configure pytest."""
 
-from _pytest.config import Config, Parser
+from _pytest.config import Config
+from _pytest.config.argparsing import Parser
 
 # Global variable that gets set with the command line --make-videos flag.
 MAKE_VIDEOS = False
