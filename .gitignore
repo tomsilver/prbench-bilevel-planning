@@ -162,4 +162,5 @@ cython_debug/
 
 .vscode/
 debug/
+unit_test_videos/
 CLAUDE.md
