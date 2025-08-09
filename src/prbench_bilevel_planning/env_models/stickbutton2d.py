@@ -208,6 +208,7 @@ def create_bilevel_planning_models(
         },
         add_effects={
             LiftedAtom(Pressed, [button]),
+            LiftedAtom(RobotAboveButton, [robot, button]),
         },
         delete_effects={LiftedAtom(AboveNoButton, [])},
     )

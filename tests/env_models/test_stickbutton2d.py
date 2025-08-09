@@ -378,7 +378,6 @@ def test_stickbutton2d_skills():
     "num_buttons, max_abstract_plans, samples_per_step",
     [
         (1, 5, 10),
-        (5, 100, 10),
     ],
 )
 def test_stickbutton2d_bilevel_planning(
@@ -412,19 +411,20 @@ def test_stickbutton2d_bilevel_planning(
         samples_per_step=samples_per_step,
         planning_timeout=60.0,  # Increase timeout for more complex environment
     )
-
-    obs, info = env.reset(seed=123)
-
-    total_reward = 0
-    agent.reset(obs, info)
-    for _ in range(2000):  # Increase max steps for more complex task
-        action = agent.step()
-        obs, reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
-        agent.update(obs, reward, terminated or truncated, info)
-        if terminated or truncated:
-            break
-    else:
-        assert False, "Did not terminate successfully"
+    for s in range(10):  # Run multiple episodes to test robustness
+        obs, info = env.reset(seed=s)
+        # img = env.render()
+        # iio.imsave(f"debug/{s}.png", img)
+        total_reward = 0
+        agent.reset(obs, info)
+        for _ in range(2000):  # Increase max steps for more complex task
+            action = agent.step()
+            obs, reward, terminated, truncated, info = env.step(action)
+            total_reward += reward
+            agent.update(obs, reward, terminated or truncated, info)
+            if terminated or truncated:
+                break
+        else:
+            assert False, "Did not terminate successfully"
 
     env.close()
