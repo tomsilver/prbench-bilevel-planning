@@ -213,11 +213,8 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=Fa
         obs, _, _, _, _ = env.step(action)
         next_state = env_models.observation_to_state(obs)
         controller.observe(next_state)
-        # Comment out exact transition matching due to floating point precision issues
-        # assert env_models.transition_fn(state, executable) == next_state
+        assert env_models.transition_fn(state, action) == next_state
         state = next_state
-
-        # Uncomment to debug.
         if debug:
             img = env.render()
             iio.imsave(f"debug/debug-test-{int(time.time()*1000.0)}.png", img)
@@ -311,15 +308,8 @@ def test_stickbutton2d_skills():
     reset_options = {"init_state": state1}
     obs1, _ = env.reset(seed=123, options=reset_options)
     # First try to directly press button4
-    # Uncomment to debug.
-    # import imageio.v2 as iio
-    # img = env.render()
-    # iio.imsave(f"debug/0.png", img)
     direct_press_button1 = RobotPressButtonFromNothing.ground((robot, button4))
     obs2 = _skill_test_helper(direct_press_button1, env_models, env, obs1)
-    # Uncomment to debug.
-    # img = env.render()
-    # iio.imsave(f"debug/1.png", img)
     # Check that button4 is not pressed
     state2 = env_models.observation_to_state(obs2)
     abstract_state2 = env_models.state_abstractor(state2)
@@ -329,29 +319,24 @@ def test_stickbutton2d_skills():
         PickStickFromNothing.ground((robot, stick)), env_models, env, obs2
     )
     # Check that stick is grasped
-    # Uncomment to debug.
-    # img = env.render()
-    # iio.imsave(f"debug/2.png", img)
     state3 = env_models.observation_to_state(obs3)
     abstract_state3 = env_models.state_abstractor(state3)
     Grasped = pred_name_to_pred["Grasped"]
     assert Grasped([robot, stick]) in abstract_state3.atoms
 
-    # # Now press button4 with stick
+    # Now press button4 with stick
     obs4 = _skill_test_helper(
         StickPressButtonFromNothing.ground((robot, stick, button4)),
         env_models,
         env,
         obs3,
     )
-    # img = env.render()
-    # iio.imsave(f"debug/3.png", img)
     # Check that button4 is pressed
     state4 = env_models.observation_to_state(obs4)
     abstract_state4 = env_models.state_abstractor(state4)
     assert Pressed([button4]) in abstract_state4.atoms
 
-    # # Now press button1 with stick
+    # Now press button1 with stick
     obs5 = _skill_test_helper(
         StickPressButtonFromButton.ground((robot, stick, button1, button4)),
         env_models,
@@ -362,16 +347,12 @@ def test_stickbutton2d_skills():
     state5 = env_models.observation_to_state(obs5)
     abstract_state5 = env_models.state_abstractor(state5)
     assert Pressed([button1]) in abstract_state5.atoms
-    # img = env.render()
-    # iio.imsave(f"debug/4.png", img)
-    # # Finally Place the stick
+    # Finally Place the stick
     obs6 = _skill_test_helper(PlaceStick.ground((robot, stick)), env_models, env, obs5)
     # Check that the robot is no longer grasping the stick
     state6 = env_models.observation_to_state(obs6)
     abstract_state6 = env_models.state_abstractor(state6)
     assert Grasped([robot, stick]) not in abstract_state6.atoms
-    # img = env.render()
-    # iio.imsave(f"debug/5.png", img)
 
 
 @pytest.mark.parametrize(
@@ -414,8 +395,6 @@ def test_stickbutton2d_bilevel_planning(
         planning_timeout=60.0,  # Increase timeout for more complex environment
     )
     obs, info = env.reset(seed=123)
-    # img = env.render()
-    # iio.imsave(f"debug/{num_buttons}.png", img)
     total_reward = 0
     agent.reset(obs, info)
     for _ in range(3000):  # Increase max steps for more complex task

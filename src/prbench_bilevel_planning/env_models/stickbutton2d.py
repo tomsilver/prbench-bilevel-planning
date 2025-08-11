@@ -16,6 +16,7 @@ from geom2drobotenvs.object_types import CircleType, CRVRobotType, RectangleType
 from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
+    object_to_multibody2d,
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
@@ -33,33 +34,7 @@ from relational_structs import (
     Variable,
 )
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
-from tomsgeoms2d.structs import Circle, Geom2D, Rectangle
-
-
-def object_to_geom(obj: Object, state: ObjectCentricState) -> Geom2D:
-    """Convert an object to its geometric representation."""
-    if obj.is_instance(CRVRobotType):
-        # Robot is a circle
-        x = state.get(obj, "x")
-        y = state.get(obj, "y")
-        radius = state.get(obj, "base_radius")
-        return Circle(x, y, radius)
-    if obj.is_instance(RectangleType):
-        # Stick is a rectangle
-        x = state.get(obj, "x")
-        y = state.get(obj, "y")
-        theta = state.get(obj, "theta")
-        width = state.get(obj, "width")
-        height = state.get(obj, "height")
-        return Rectangle(x, y, width, height, theta)
-    if obj.is_instance(CircleType):
-        # Button is a circle
-        x = state.get(obj, "x")
-        y = state.get(obj, "y")
-        radius = state.get(obj, "radius")
-        return Circle(x, y, radius)
-
-    raise ValueError(f"Unknown object type: {obj.type}")
+from tomsgeoms2d.structs import Geom2D
 
 
 def create_bilevel_planning_models(
@@ -156,17 +131,26 @@ def create_bilevel_planning_models(
                 atoms.add(GroundAtom(Pressed, [button]))
 
         # Add spatial relationship atoms using geometry
-        robot_geom = object_to_geom(robot, x)
-        stick_geom = object_to_geom(stick, x)
+        robot_multi_body = object_to_multibody2d(robot, x, {})
+        stick_multi_body = object_to_multibody2d(stick, x, {})
+        assert len(stick_multi_body.bodies) == 1
+        stick_geom = stick_multi_body.bodies[0].geom
+        robot_geom: set[Geom2D] = set()
+        for body in robot_multi_body.bodies:
+            robot_geom.add(body.geom)
 
         robot_above_any_button = False
         stick_above_any_button = False
 
         for button in buttons:
-            button_geom = object_to_geom(button, x)
+            button_multi_body = object_to_multibody2d(button, x, {})
+            assert len(button_multi_body.bodies) == 1
+            button_geom = button_multi_body.bodies[0].geom
 
             # Check if robot is above button (geometrically intersects)
-            if robot_geom.intersects(button_geom):
+            if any(
+                robot_geom_sub.intersects(button_geom) for robot_geom_sub in robot_geom
+            ):
                 atoms.add(GroundAtom(RobotAboveButton, [robot, button]))
                 robot_above_any_button = True
 
