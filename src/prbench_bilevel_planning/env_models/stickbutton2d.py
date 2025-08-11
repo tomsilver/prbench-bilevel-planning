@@ -55,29 +55,16 @@ def create_bilevel_planning_models(
         """Convert the vectors back into (hashable) object-centric states."""
         return observation_space.devectorize(o)
 
-    # The object-centric states that are passed around in planning do not include the
-    # globally constant objects, so we need to create an exemplar state that does
-    # include them and then copy in the changing values before calling step().
-    exemplar_state = sim.reset()[0]
-
     # Create the transition function.
     def transition_fn(
         x: ObjectCentricState, u: NDArray[np.float32]
     ) -> ObjectCentricState:
         """Simulate the action."""
         # See note above re: why we can't just sim.reset(options={"init_state": x}).
-        state = exemplar_state.copy()
-        for obj, feats in x.data.items():
-            state.data[obj] = feats
-        # Now we can reset().
+        state = x.copy()
         sim.reset(options={"init_state": state})
-        sim_obs, _, _, _, _ = sim.step(u)
-
-        # Now we need to extract back out the changing objects.
-        next_x = x.copy()
-        for obj in x:
-            next_x.data[obj] = sim_obs.data[obj]
-        return next_x
+        obs, _, _, _, _ = sim.step(u)
+        return obs
 
     # Types.
     types = {CRVRobotType, RectangleType, CircleType}

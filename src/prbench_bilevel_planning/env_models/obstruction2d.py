@@ -52,10 +52,6 @@ def create_bilevel_planning_models(
         """Convert the vectors back into (hashable) object-centric states."""
         return observation_space.devectorize(o)
 
-    def state_to_observation(x: ObjectCentricState) -> NDArray[np.float32]:
-        """Convert the object-centric state into a vector."""
-        return observation_space.vectorize(x)
-
     # Create the transition function.
     def transition_fn(
         x: ObjectCentricState,
@@ -66,15 +62,8 @@ def create_bilevel_planning_models(
         state = x.copy()
         # Now we can reset().
         sim.reset(options={"init_state": state})
-        full_obs, _, _, _, _ = sim.step(u)
-        # Convert full to changed objects
-        sim_obs = observation_to_state(state_to_observation(full_obs))
-        # Uncomment to debug.
-        # import imageio.v2 as iio
-        # import time
-        # img = sim.render()
-        # iio.imsave(f"debug/debug-sim-{int(time.time()*1000.0)}.png", img)
-        return sim_obs.copy()
+        obs, _, _, _, _ = sim.step(u)
+        return obs.copy()
 
     # Types.
     types = {CRVRobotType, RectangleType, TargetBlockType, TargetSurfaceType}
