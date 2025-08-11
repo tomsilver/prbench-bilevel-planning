@@ -8,8 +8,8 @@ Examples:
     python experiments/run_experiment.py -m env=obstruction2d-o0 seed=0 \
         samples_per_step=1,5,10
 
-    python experiments/run_experiment.py -m env=obstruction2d-o0 seed=0 \
-        max_abstract_plans=1,5,10
+    python experiments/run_experiment.py -m env=stickbutton2d-b3 seed=0 \
+        max_abstract_plans=1,5,10,20
 """
 
 import logging
@@ -28,7 +28,7 @@ from prbench_bilevel_planning.agent import AgentFailure, BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
 
 
-@hydra.main(version_base=None, config_name="config", config_path="conf/")
+@hydra.main(version_base=None, config_name="config_stickbutton2d", config_path="conf/")
 def _main(cfg: DictConfig) -> None:
 
     logging.info(f"Running seed={cfg.seed}, env={cfg.env.env_name}")

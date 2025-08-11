@@ -67,7 +67,7 @@ def create_bilevel_planning_models(
         # Now we can reset().
         sim.reset(options={"init_state": state})
         full_obs, _, _, _, _ = sim.step(u)
-        # convert full to changed objects
+        # Convert full to changed objects
         sim_obs = observation_to_state(state_to_observation(full_obs))
         # Uncomment to debug.
         # import imageio.v2 as iio
