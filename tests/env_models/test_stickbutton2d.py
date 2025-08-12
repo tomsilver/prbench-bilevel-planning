@@ -25,7 +25,7 @@ def test_stickbutton2d_observation_to_state():
     observation_to_state = env_models.observation_to_state
     obs, _ = env.reset(seed=123)
     state = observation_to_state(obs)
-    assert isinstance(hash(state), int)  # states are hashable for bilevel planning
+    assert isinstance(hash(state), int)
     assert env_models.state_space.contains(state)
     assert env_models.observation_space == env.observation_space
     env.close()
