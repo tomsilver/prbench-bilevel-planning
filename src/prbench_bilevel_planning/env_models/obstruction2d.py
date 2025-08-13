@@ -41,10 +41,6 @@ def create_bilevel_planning_models(
     assert isinstance(observation_space, ObjectCentricBoxSpace)
     assert isinstance(action_space, CRVRobotActionSpace)
 
-    # Make a local copy of the environment to use as the "simulator". Note that we use
-    # the object-centric version of the environment because we want access to the reset
-    # and step functions in there, which operate over ObjectCentricState, which we use
-    # as the state representation for planning.
     sim = ObjectCentricObstruction2DEnv(num_obstructions=num_obstructions)
 
     # Convert observations into states. The important thing is that states are hashable.
@@ -52,36 +48,16 @@ def create_bilevel_planning_models(
         """Convert the vectors back into (hashable) object-centric states."""
         return observation_space.devectorize(o)
 
-    # The object-centric states that are passed around in planning do not include the
-    # globally constant objects, so we need to create an exemplar state that does
-    # include them and then copy in the changing values before calling step().
-    exemplar_state = sim.reset()[0]
-
     # Create the transition function.
     def transition_fn(
         x: ObjectCentricState,
         u: NDArray[np.float32],
     ) -> ObjectCentricState:
         """Simulate the action."""
-        # See note above re: why we can't just sim.reset(options={"init_state": x}).
-        state = exemplar_state.copy()
-        for obj, feats in x.data.items():
-            state.data[obj] = feats
-        # Now we can reset().
+        state = x.copy()
         sim.reset(options={"init_state": state})
-        sim_obs, _, _, _, _ = sim.step(u)
-
-        # Uncomment to debug.
-        # import imageio.v2 as iio
-        # import time
-        # img = sim.render()
-        # iio.imsave(f"debug/debug-sim-{int(time.time()*1000.0)}.png", img)
-
-        # Now we need to extract back out the changing objects.
-        next_x = x.copy()
-        for obj in x:
-            next_x.data[obj] = sim_obs.data[obj]
-        return next_x
+        obs, _, _, _, _ = sim.step(u)
+        return obs.copy()
 
     # Types.
     types = {CRVRobotType, RectangleType, TargetBlockType, TargetSurfaceType}

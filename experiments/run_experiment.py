@@ -8,8 +8,8 @@ Examples:
     python experiments/run_experiment.py -m env=obstruction2d-o0 seed=0 \
         samples_per_step=1,5,10
 
-    python experiments/run_experiment.py -m env=obstruction2d-o0 seed=0 \
-        max_abstract_plans=1,5,10
+    python experiments/run_experiment.py -m env=stickbutton2d-b3 seed=0 \
+        max_abstract_plans=1,5,10,20
 """
 
 import logging

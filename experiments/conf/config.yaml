@@ -8,16 +8,16 @@ hydra:
 # General.
 seed: 0
 num_eval_episodes: 10
-max_eval_steps: 1000
+max_eval_steps: 3000
 
 # Approach.
-max_abstract_plans: 10
-samples_per_step: 10
+max_abstract_plans: 20
+samples_per_step: 3
 max_skill_horizon: 100
 heuristic_name: "hff"
-planning_timeout: 30  # seconds
+planning_timeout: 60  # seconds
 
 # Environment.
 defaults:
   - _self_
-  - env: obstruction2d-o0
+  - env: stickbutton2d-b1
