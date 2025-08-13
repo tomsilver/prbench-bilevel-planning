@@ -28,7 +28,7 @@ from prbench_bilevel_planning.agent import AgentFailure, BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
 
 
-@hydra.main(version_base=None, config_name="config_stickbutton2d", config_path="conf/")
+@hydra.main(version_base=None, config_name="config", config_path="conf/")
 def _main(cfg: DictConfig) -> None:
 
     logging.info(f"Running seed={cfg.seed}, env={cfg.env.env_name}")

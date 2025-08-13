@@ -41,10 +41,6 @@ def create_bilevel_planning_models(
     assert isinstance(observation_space, ObjectCentricBoxSpace)
     assert isinstance(action_space, CRVRobotActionSpace)
 
-    # Make a local copy of the environment to use as the "simulator". Note that we use
-    # the object-centric version of the environment because we want access to the reset
-    # and step functions in there, which operate over ObjectCentricState, which we use
-    # as the state representation for planning.
     sim = ObjectCentricObstruction2DEnv(num_obstructions=num_obstructions)
 
     # Convert observations into states. The important thing is that states are hashable.
@@ -58,9 +54,7 @@ def create_bilevel_planning_models(
         u: NDArray[np.float32],
     ) -> ObjectCentricState:
         """Simulate the action."""
-        # See note above re: why we can't just sim.reset(options={"init_state": x}).
         state = x.copy()
-        # Now we can reset().
         sim.reset(options={"init_state": state})
         obs, _, _, _, _ = sim.step(u)
         return obs.copy()
