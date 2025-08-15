@@ -72,9 +72,6 @@ def create_bilevel_planning_models(
     # Create the state space.
     state_space = ObjectCentricStateSpace(types)
 
-    # Static objects.
-    static_object_state = sim.initial_constant_state.copy()
-
     # Predicates.
     Holding = Predicate("Holding", [CRVRobotType, TargetBlockType])
     HandEmpty = Predicate("HandEmpty", [CRVRobotType])
@@ -189,7 +186,7 @@ def create_bilevel_planning_models(
             self._shelf = objects[2]
             assert self._robot.is_instance(CRVRobotType)
             super().__init__(objects)
-            self._current_params: float = 0.0
+            self._current_params: tuple[float, float] | float = 0.0
             self._current_plan: list[NDArray[np.float32]] | None = None
             self._current_state: ObjectCentricState | None = None
             # Extract max deltas from action space bounds
@@ -253,7 +250,9 @@ def create_bilevel_planning_models(
 
             return plan
 
-        def reset(self, x: ObjectCentricState, params: float) -> None:
+        def reset(
+            self, x: ObjectCentricState, params: tuple[float, float] | float
+        ) -> None:
             self._current_params = params
             self._current_plan = None
             self._current_state = x
@@ -284,9 +283,6 @@ def create_bilevel_planning_models(
     class GroundPickBlockNotOnShelfController(_CommonGroundController):
         """Controller for grasping the block that is not on the shelf yet."""
 
-        def __init__(self, objects: Sequence[Object]) -> None:
-            super().__init__(objects)
-
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
         ) -> tuple[float, float]:
@@ -309,10 +305,15 @@ def create_bilevel_planning_models(
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 0.0, 1.0
 
-        def reset(self, x: ObjectCentricState, params: tuple[float, float]) -> None:
-            self._current_params = params
-            self._current_plan = None
-            self._current_state = x
+        def reset(
+            self, x: ObjectCentricState, params: tuple[float, float] | float
+        ) -> None:
+            # Override to ensure params are tuples for this controller
+            if not isinstance(params, tuple):
+                raise ValueError(
+                    "PickBlockNotOnShelfController requires tuple parameters"
+                )
+            super().reset(x, params)
 
         def terminated(self) -> bool:
             return self._current_plan is not None and len(self._current_plan) == 0
@@ -329,7 +330,12 @@ def create_bilevel_planning_models(
 
         def _calculate_grasp_robot_pose(self, state: ObjectCentricState) -> SE2Pose:
             """Calculate the actual grasp point based on ratio parameter."""
-            grasp_ratio, arm_length = self._current_params
+            if isinstance(self._current_params, tuple):
+                grasp_ratio, arm_length = self._current_params
+            else:
+                raise ValueError(
+                    "Expected tuple parameters for grasp ratio and arm length"
+                )
 
             # Get block properties and grasp frame
             block_x = state.get(self._block, "x")
@@ -361,14 +367,20 @@ def create_bilevel_planning_models(
 
             # Calculate grasp point and robot target position
             target_se2_pose = self._calculate_grasp_robot_pose(state)
-            _, desired_arm_length = self._current_params
+            if isinstance(self._current_params, tuple):
+                _, desired_arm_length = self._current_params
+            else:
+                raise ValueError(
+                    "Expected tuple parameters for grasp ratio and arm length"
+                )
 
             # Plan collision-free waypoints to the target pose
             # We set the arm to be the shortest length during motion planning
             mp_state = state.copy()
             mp_state.set(self._robot, "arm_joint", robot_radius)
+            assert isinstance(action_space, CRVRobotActionSpace)
             collision_free_waypoints = run_motion_planning_for_crv_robot(
-                mp_state, self._robot, target_se2_pose, sim.action_space
+                mp_state, self._robot, target_se2_pose, action_space
             )
             final_waypoints: list[tuple[SE2Pose, float]] = []
             current_wp = (
@@ -390,22 +402,13 @@ def create_bilevel_planning_models(
             return final_waypoints
 
     class GroundPickBlockOnShelfController(GroundPickBlockNotOnShelfController):
-        """Controller for grasping the block that is not on the shelf yet."""
-
-        def __init__(self, objects: Sequence[Object]) -> None:
-            super().__init__(objects)
+        """Controller for grasping the block that is on the shelf."""
 
     class GroundPlaceBlockNotOnShelfController(GroundPickBlockNotOnShelfController):
-        """Controller for grasping the block that is not on the shelf yet."""
-
-        def __init__(self, objects: Sequence[Object]) -> None:
-            super().__init__(objects)
+        """Controller for placing the block not on the shelf."""
 
     class GroundPlaceBlockOnShelfController(GroundPickBlockNotOnShelfController):
-        """Controller for grasping the block that is not on the shelf yet."""
-
-        def __init__(self, objects: Sequence[Object]) -> None:
-            super().__init__(objects)
+        """Controller for placing the block on the shelf."""
 
     # Lifted controllers.
     PickBlockNotOnShelfController: LiftedParameterizedController = (

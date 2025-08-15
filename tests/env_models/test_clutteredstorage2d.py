@@ -105,7 +105,8 @@ def test_clutteredstorage2d_state_abstractor():
     assert "shelf" in obj_name_to_obj
     assert "block0" in obj_name_to_obj
 
-    # Initially, robot hand should be empty and block should be either on shelf or not on shelf
+    # Initially, robot hand should be empty and block should be either on shelf or
+    # not on shelf
     assert HandEmpty([robot]) in abstract_state.atoms
     assert (
         NotOnShelf([block0, shelf]) in abstract_state.atoms
@@ -152,10 +153,11 @@ def test_clutteredstorage2d_skills():
     )
     pred_name_to_pred = {p.name: p for p in env_models.predicates}
     skill_name_to_skill = {s.operator.name: s for s in env_models.skills}
-    PickBlockNotOnShelf = skill_name_to_skill["PickBlockNotOnShelf"]
-    PickBlockOnShelf = skill_name_to_skill["PickBlockOnShelf"]
-    PlaceBlockNotOnShelf = skill_name_to_skill["PlaceBlockNotOnShelf"]
-    PlaceBlockOnShelf = skill_name_to_skill["PlaceBlockOnShelf"]
+    pick_block_not_on_shelf = skill_name_to_skill["PickBlockNotOnShelf"]
+    # Other skills are available but not used in this basic test
+    # pick_block_on_shelf = skill_name_to_skill["PickBlockOnShelf"]
+    # place_block_not_on_shelf = skill_name_to_skill["PlaceBlockNotOnShelf"]
+    # place_block_on_shelf = skill_name_to_skill["PlaceBlockOnShelf"]
 
     # Test pick and place the block that is not on shelf
     obs0, _ = env.reset(seed=123)
@@ -167,10 +169,12 @@ def test_clutteredstorage2d_skills():
     shelf = obj_name_to_obj["shelf"]
     NotOnShelf = pred_name_to_pred["NotOnShelf"]
     assert NotOnShelf([block0, shelf]) in abstract_state.atoms
-    pick_block_not_on_shelf = PickBlockNotOnShelf.ground((robot, block0, shelf))
+    pick_block_not_on_shelf_skill = pick_block_not_on_shelf.ground(
+        (robot, block0, shelf)
+    )
 
     # First pick the block
-    obs1 = _skill_test_helper(pick_block_not_on_shelf, env_models, env, obs0)
+    obs1 = _skill_test_helper(pick_block_not_on_shelf_skill, env_models, env, obs0)
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
     assert pred_name_to_pred["Holding"]([robot, block0]) in abstract_state1.atoms
