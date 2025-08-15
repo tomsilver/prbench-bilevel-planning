@@ -13,15 +13,22 @@ from bilevel_planning.structs import (
     SesameModels,
 )
 from geom2drobotenvs.concepts import is_inside
-from prbench.envs.clutteredstorage2d import TargetBlockType, ShelfType
-from geom2drobotenvs.object_types import CRVRobotType, RectangleType
+from geom2drobotenvs.object_types import CRVRobotType
+from geom2drobotenvs.structs import (
+    SE2Pose,
+)
 from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
+    run_motion_planning_for_crv_robot,
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
-from prbench.envs.clutteredstorage2d import ObjectCentricClutteredStorage2DEnv
+from prbench.envs.geom2d.clutteredstorage2d import (
+    ObjectCentricClutteredStorage2DEnv,
+    ShelfType,
+    TargetBlockType,
+)
 from relational_structs import (
     GroundAtom,
     LiftedAtom,
@@ -71,8 +78,8 @@ def create_bilevel_planning_models(
     # Predicates.
     Holding = Predicate("Holding", [CRVRobotType, TargetBlockType])
     HandEmpty = Predicate("HandEmpty", [CRVRobotType])
-    NotOnShelf = Predicate("NotOnShelf", [TargetBlockType])
-    OnShelf = Predicate("OnShelf", [TargetBlockType])
+    NotOnShelf = Predicate("NotOnShelf", [TargetBlockType, ShelfType])
+    OnShelf = Predicate("OnShelf", [TargetBlockType, ShelfType])
     predicates = {Holding, HandEmpty, NotOnShelf, OnShelf}
 
     # State abstractor.
@@ -81,7 +88,8 @@ def create_bilevel_planning_models(
         robot = x.get_objects(CRVRobotType)[0]
         # Get all target blocks in the environment
         target_blocks = x.get_objects(TargetBlockType)
-        
+        shelf = x.get_objects(ShelfType)[0]
+
         atoms: set[GroundAtom] = set()
         # Add holding / handempty atoms.
         suctioned_objs = {o for o, _ in get_suctioned_objects(x, robot)}
@@ -90,97 +98,112 @@ def create_bilevel_planning_models(
                 atoms.add(GroundAtom(Holding, [robot, block]))
         if not suctioned_objs:
             atoms.add(GroundAtom(HandEmpty, [robot]))
-        
-        # Add "on" atoms.
-        full_state = x.copy()
-        full_state.data.update(static_object_state.data)
-        shelf_objects = full_state.get_objects(ShelfType)
-        if shelf_objects:
-            shelf = shelf_objects[0]
-            for block in target_blocks:
-                if is_inside(full_state, block, shelf, {}):
-                    atoms.add(GroundAtom(OnShelf, [block]))
-                else:
-                    atoms.add(GroundAtom(NotOnShelf, [block]))
-            objects = {robot, shelf} | set(target_blocks)
-        else:
-            # If no shelf found, all blocks are not on shelf
-            for block in target_blocks:
-                atoms.add(GroundAtom(NotOnShelf, [block]))
-            objects = {robot} | set(target_blocks)
-        
+
+        for block in target_blocks:
+            if is_inside(x, block, shelf, {}):
+                atoms.add(GroundAtom(OnShelf, [block, shelf]))
+            else:
+                atoms.add(GroundAtom(NotOnShelf, [block, shelf]))
+        objects = {robot, shelf} | set(target_blocks)
+
         return RelationalAbstractState(atoms, objects)
 
     # Goal abstractor.
     def goal_deriver(x: ObjectCentricState) -> RelationalAbstractGoal:
         """The goal is to have all blocks on the shelf."""
         target_blocks = x.get_objects(TargetBlockType)
+        shelf = x.get_objects(ShelfType)[0]
         atoms = set()
         for block in target_blocks:
-            atoms.add(GroundAtom(OnShelf, [block]))
+            atoms.add(GroundAtom(OnShelf, [block, shelf]))
         return RelationalAbstractGoal(atoms, state_abstractor)
 
     # Operators.
     robot = Variable("?robot", CRVRobotType)
-    shelf = Variable("?shelf", ShelfType)
     block = Variable("?block", TargetBlockType)
-    
+    shelf = Variable("?shelf", ShelfType)
+
     PickBlockNotOnShelfOperator = LiftedOperator(
         "PickBlockNotOnShelf",
-        [robot, block],
-        preconditions={LiftedAtom(HandEmpty, [robot]), LiftedAtom(NotOnShelf, [block])},
+        [robot, block, shelf],
+        preconditions={
+            LiftedAtom(HandEmpty, [robot]),
+            LiftedAtom(NotOnShelf, [block, shelf]),
+        },
         add_effects={LiftedAtom(Holding, [robot, block])},
-        delete_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(NotOnShelf, [block])},
+        delete_effects={LiftedAtom(HandEmpty, [robot])},
     )
     PickBlockOnShelfOperator = LiftedOperator(
         "PickBlockOnShelf",
-        [robot, block],
-        preconditions={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnShelf, [block])},
+        [robot, block, shelf],
+        preconditions={
+            LiftedAtom(HandEmpty, [robot]),
+            LiftedAtom(OnShelf, [block, shelf]),
+        },
         add_effects={LiftedAtom(Holding, [robot, block])},
-        delete_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnShelf, [block])},
+        delete_effects={LiftedAtom(HandEmpty, [robot])},
     )
     PlaceBlockNotOnShelfOperator = LiftedOperator(
         "PlaceBlockNotOnShelf",
-        [robot, block],
-        preconditions={LiftedAtom(Holding, [robot, block])},
-        add_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(NotOnShelf, [block])},
-        delete_effects={LiftedAtom(Holding, [robot, block])},
+        [robot, block, shelf],
+        preconditions={
+            LiftedAtom(Holding, [robot, block]),
+            LiftedAtom(OnShelf, [block, shelf]),
+        },
+        add_effects={
+            LiftedAtom(HandEmpty, [robot]),
+            LiftedAtom(NotOnShelf, [block, shelf]),
+        },
+        delete_effects={
+            LiftedAtom(Holding, [robot, block]),
+            LiftedAtom(OnShelf, [block, shelf]),
+        },
     )
     PlaceBlockOnShelfOperator = LiftedOperator(
         "PlaceBlockOnShelf",
-        [robot, block],
-        preconditions={LiftedAtom(Holding, [robot, block])},
-        add_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnShelf, [block])},
-        delete_effects={LiftedAtom(Holding, [robot, block])},
+        [robot, block, shelf],
+        preconditions={
+            LiftedAtom(Holding, [robot, block]),
+            LiftedAtom(NotOnShelf, [block, shelf]),
+        },
+        add_effects={
+            LiftedAtom(HandEmpty, [robot]),
+            LiftedAtom(OnShelf, [block, shelf]),
+        },
+        delete_effects={
+            LiftedAtom(Holding, [robot, block]),
+            LiftedAtom(NotOnShelf, [block, shelf]),
+        },
     )
 
     # Controllers.
     class _CommonGroundController(GroundParameterizedController, abc.ABC):
-        """Shared controller code between picking and placing."""
+        """Shared controller code between different actions."""
 
         def __init__(
             self,
             objects: Sequence[Object],
-            safe_y: float = 0.8,
-            max_delta: float = 0.025,
         ) -> None:
-            robot, block = objects
-            assert robot.is_instance(CRVRobotType)
-            assert block.is_instance(TargetBlockType)
-            self._robot = robot
-            self._block = block
+            self._robot = objects[0]
+            self._block = objects[1]
+            self._shelf = objects[2]
+            assert self._robot.is_instance(CRVRobotType)
             super().__init__(objects)
-            self._current_params: float = 0.0  # different meanings for subclasses
+            self._current_params: float = 0.0
             self._current_plan: list[NDArray[np.float32]] | None = None
             self._current_state: ObjectCentricState | None = None
-            self._safe_y = safe_y
-            self._max_delta = max_delta
+            # Extract max deltas from action space bounds
+            assert isinstance(action_space, CRVRobotActionSpace)
+            self._max_delta_x = action_space.high[0]
+            self._max_delta_y = action_space.high[1]
+            self._max_delta_theta = action_space.high[2]
+            self._max_delta_arm = action_space.high[3]
 
         @abc.abstractmethod
         def _generate_waypoints(
             self, state: ObjectCentricState
-        ) -> list[tuple[float, float]]:
-            """Generate a waypoint plan."""
+        ) -> list[tuple[SE2Pose, float]]:
+            """Generate a waypoint plan with x, y, theta, arm values."""
 
         @abc.abstractmethod
         def _get_vacuum_actions(self) -> tuple[float, float]:
@@ -189,26 +212,42 @@ def create_bilevel_planning_models(
         def _waypoints_to_plan(
             self,
             state: ObjectCentricState,
-            waypoints: list[tuple[float, float]],
+            waypoints: list[tuple[SE2Pose, float]],
             vacuum_during_plan: float,
         ) -> list[NDArray[np.float32]]:
-            current_pos = (state.get(self._robot, "x"), state.get(self._robot, "y"))
+            curr_x = state.get(self._robot, "x")
+            curr_y = state.get(self._robot, "y")
+            curr_theta = state.get(self._robot, "theta")
+            curr_arm = state.get(self._robot, "arm_joint")
+            current_pos = (SE2Pose(curr_x, curr_y, curr_theta), curr_arm)
             waypoints = [current_pos] + waypoints
             plan: list[NDArray[np.float32]] = []
             for start, end in zip(waypoints[:-1], waypoints[1:]):
-                if np.allclose(start, end):
+                start_pose = np.array(
+                    [start[0].x, start[0].y, start[0].theta, start[1]]
+                )
+                end_pose = np.array([end[0].x, end[0].y, end[0].theta, end[1]])
+                if np.allclose(start_pose, end_pose):
                     continue
-                total_dx = end[0] - start[0]
-                total_dy = end[1] - start[1]
+                total_dx = end[0].x - start[0].x
+                total_dy = end[0].y - start[0].y
+                total_dtheta = end[0].theta - start[0].theta
+                total_darm = end[1] - start[1]
                 num_steps = int(
                     max(
-                        np.ceil(abs(total_dx) / self._max_delta),
-                        np.ceil(abs(total_dy) / self._max_delta),
+                        np.ceil(abs(total_dx) / self._max_delta_x),
+                        np.ceil(abs(total_dy) / self._max_delta_y),
+                        np.ceil(abs(total_dtheta) / self._max_delta_theta),
+                        np.ceil(abs(total_darm) / self._max_delta_arm),
                     )
                 )
                 dx = total_dx / num_steps
                 dy = total_dy / num_steps
-                action = np.array([dx, dy, 0, 0, vacuum_during_plan], dtype=np.float32)
+                dtheta = total_dtheta / num_steps
+                darm = total_darm / num_steps
+                action = np.array(
+                    [dx, dy, dtheta, darm, vacuum_during_plan], dtype=np.float32
+                )
                 for _ in range(num_steps):
                     plan.append(action)
 
@@ -223,11 +262,7 @@ def create_bilevel_planning_models(
             return self._current_plan is not None and len(self._current_plan) == 0
 
         def step(self) -> NDArray[np.float32]:
-            # Always extend the arm first before planning.
             assert self._current_state is not None
-            if self._current_state.get(self._robot, "arm_joint") <= 0.15:
-                assert isinstance(action_space, CRVRobotActionSpace)
-                return np.array([0, 0, 0, action_space.high[3], 0], dtype=np.float32)
             if self._current_plan is None:
                 self._current_plan = self._generate_plan(self._current_state)
             return self._current_plan.pop(0)
@@ -243,182 +278,170 @@ def create_bilevel_planning_models(
             plan_suffix: list[NDArray[np.float32]] = [
                 # Change the vacuum.
                 np.array([0, 0, 0, 0, vacuum_after_plan], dtype=np.float32),
-                # Move up slightly to break contact.
-                np.array(
-                    [0, action_space.high[1], 0, 0, vacuum_after_plan], dtype=np.float32
-                ),
             ]
             return waypoint_plan + plan_suffix
 
-    class GroundPickController(_CommonGroundController):
-        """Controller for picking a block when the robot's hand is free.
+    class GroundPickBlockNotOnShelfController(_CommonGroundController):
+        """Controller for grasping the block that is not on the shelf yet."""
 
-        This controller uses waypoints rather than doing motion planning. This is just
-        because the environment is simple enough where waypoints should always work.
-
-        The parameters for this controller represent the grasp x position RELATIVE to
-        the center of the block.
-        """
+        def __init__(self, objects: Sequence[Object]) -> None:
+            super().__init__(objects)
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
-        ) -> float:
-            gripper_height = x.get(self._robot, "gripper_height")
-            block_width = x.get(self._block, "width")
-            params = rng.uniform(-gripper_height / 2, block_width + gripper_height / 2)
-            return params
-
-        def _generate_waypoints(
-            self, state: ObjectCentricState
-        ) -> list[tuple[float, float]]:
-            robot_x = state.get(self._robot, "x")
-            block_x = state.get(self._block, "x")
-            robot_arm_joint = state.get(self._robot, "arm_joint")
-            target_x, target_y = get_robot_transfer_position(
-                self._block,
-                state,
-                block_x,
-                robot_arm_joint,
-                relative_x_offset=self._current_params,
+        ) -> tuple[float, float]:
+            # Sample grasp ratio on the width of the block
+            # <0.0: custom frame dy < 0
+            # >0.0: custom frame dy > 0
+            while True:
+                grasp_ratio = rng.uniform(-1.0, 1.0)
+                if grasp_ratio != 0.0:
+                    break
+            max_arm_length = x.get(self._robot, "arm_length")
+            min_arm_length = (
+                x.get(self._robot, "base_radius")
+                + x.get(self._robot, "gripper_width") / 2
+                + 1e-4
             )
-            return [
-                # Start by moving to safe height (may already be there).
-                (robot_x, self._safe_y),
-                # Move to above the target block, offset by params.
-                (target_x, self._safe_y),
-                # Move down to grasp.
-                (target_x, target_y),
-            ]
+            arm_length = rng.uniform(min_arm_length, max_arm_length)
+            return (grasp_ratio, arm_length)
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 0.0, 1.0
 
-    class _GroundPlaceController(_CommonGroundController):
-        """Controller for placing a held block.
+        def reset(self, x: ObjectCentricState, params: tuple[float, float]) -> None:
+            self._current_params = params
+            self._current_plan = None
+            self._current_state = x
 
-        This controller uses waypoints rather than doing motion planning. This is just
-        because the environment is simple enough where waypoints should always work.
+        def terminated(self) -> bool:
+            return self._current_plan is not None and len(self._current_plan) == 0
 
-        The parameters for this controller represent the ABSOLUTE x position where the
-        robot will release the held block.
-        """
+        def step(self) -> NDArray[np.float32]:
+            # Always extend the arm first before planning
+            assert self._current_state is not None
+            if self._current_plan is None:
+                self._current_plan = self._generate_plan(self._current_state)
+            return self._current_plan.pop(0)
+
+        def observe(self, x: ObjectCentricState) -> None:
+            self._current_state = x
+
+        def _calculate_grasp_robot_pose(self, state: ObjectCentricState) -> SE2Pose:
+            """Calculate the actual grasp point based on ratio parameter."""
+            grasp_ratio, arm_length = self._current_params
+
+            # Get block properties and grasp frame
+            block_x = state.get(self._block, "x")
+            block_y = state.get(self._block, "y")
+            block_theta = state.get(self._block, "theta")
+            rel_point_x = block_x
+            rel_point_y = block_y + state.get(self._block, "height") / 2
+            rel_point = SE2Pose(rel_point_x, rel_point_y, block_theta)
+
+            # Relative SE2 pose w.r.t the grasp frame
+            custom_dx = abs(grasp_ratio) * state.get(self._block, "width")
+            custom_dy = state.get(self._block, "height") / 2 + arm_length
+            custom_dy *= -1 if grasp_ratio < 0 else 1
+            custom_dtheta = np.pi / 2 if grasp_ratio < 0 else -np.pi / 2
+            custom_pose = SE2Pose(custom_dx, custom_dy, custom_dtheta)
+
+            target_se2_pose = rel_point * custom_pose
+            return target_se2_pose
 
         def _generate_waypoints(
             self, state: ObjectCentricState
-        ) -> list[tuple[float, float]]:
+        ) -> list[tuple[SE2Pose, float]]:
             robot_x = state.get(self._robot, "x")
-            robot_arm_joint = state.get(self._robot, "arm_joint")
-            placement_x = self._current_params
-            target_x, target_y = get_robot_transfer_position(
-                self._block,
-                state,
-                placement_x,
-                robot_arm_joint,
+            robot_y = state.get(self._robot, "y")
+            robot_theta = state.get(self._robot, "theta")
+            robot_radius = state.get(self._robot, "base_radius")
+            robot_gripper_width = state.get(self._robot, "gripper_width")
+            safe_y = robot_radius + robot_gripper_width * 2
+
+            # Calculate grasp point and robot target position
+            target_se2_pose = self._calculate_grasp_robot_pose(state)
+            _, desired_arm_length = self._current_params
+
+            # Plan collision-free waypoints to the target pose
+            # We set the arm to be the shortest length during motion planning
+            mp_state = state.copy()
+            mp_state.set(self._robot, "arm_joint", robot_radius)
+            collision_free_waypoints = run_motion_planning_for_crv_robot(
+                mp_state, self._robot, target_se2_pose, sim.action_space
+            )
+            final_waypoints: list[tuple[SE2Pose, float]] = []
+            current_wp = (
+                SE2Pose(robot_x, robot_y, robot_theta),
+                state.get(self._robot, "arm_joint"),
             )
 
-            return [
-                # Start by moving to safe height (may already be there).
-                (robot_x, self._safe_y),
-                # Move to above the target position.
-                (target_x, self._safe_y),
-                # Move down to place.
-                (target_x, target_y),
-            ]
-
-        def _get_vacuum_actions(self) -> tuple[float, float]:
-            return 1.0, 0.0
-
-    class GroundPlaceNotOnShelfController(_GroundPlaceController):
-        """Controller for placing a held block not on the shelf."""
-
-        def sample_parameters(
-            self, x: ObjectCentricState, rng: np.random.Generator
-        ) -> float:
-            world_min_x = 0.0
-            world_max_x = 5.0
-            # Avoid placing too close to the shelf
-            full_state = x.copy()
-            full_state.data.update(static_object_state.data)
-            shelf_objects = full_state.get_objects(ShelfType)
-            
-            if shelf_objects:
-                shelf = shelf_objects[0]
-                shelf_x = full_state.get(shelf, "x")
-                shelf_width = full_state.get(shelf, "width")
-                shelf_left = shelf_x
-                shelf_right = shelf_x + shelf_width
-                
-                # Sample from areas not overlapping with shelf
-                if shelf_left > world_min_x and shelf_right < world_max_x:
-                    # Shelf in middle, choose left or right
-                    if rng.random() < 0.5:
-                        return rng.uniform(world_min_x, shelf_left - 0.1)
-                    else:
-                        return rng.uniform(shelf_right + 0.1, world_max_x)
-                elif shelf_left <= world_min_x:
-                    # Shelf on left, use right side
-                    return rng.uniform(shelf_right + 0.1, world_max_x)
-                else:
-                    # Shelf on right, use left side  
-                    return rng.uniform(world_min_x, shelf_left - 0.1)
+            if collision_free_waypoints is not None:
+                final_waypoints.append(
+                    (SE2Pose(robot_x, safe_y, robot_theta), robot_radius)
+                )
+                for wp in collision_free_waypoints:
+                    final_waypoints.append((wp, robot_radius))
+                final_waypoints.append((target_se2_pose, desired_arm_length))
             else:
-                # No shelf found, just use anywhere
-                return rng.uniform(world_min_x, world_max_x)
+                # Stay static
+                final_waypoints.append(current_wp)
 
-    class GroundPlaceOnShelfController(_GroundPlaceController):
-        """Controller for placing a held block on the shelf."""
+            return final_waypoints
 
-        def sample_parameters(
-            self, x: ObjectCentricState, rng: np.random.Generator
-        ) -> float:
-            full_state = x.copy()
-            full_state.data.update(static_object_state.data)
-            shelf_objects = full_state.get_objects(ShelfType)
-            
-            if shelf_objects:
-                shelf = shelf_objects[0]
-                shelf_x = full_state.get(shelf, "x")
-                shelf_width = full_state.get(shelf, "width")
-                block_width = x.get(self._block, "width")
-                robot = x.get_objects(CRVRobotType)[0]
-                robot_x = x.get(robot, "x")
-                block_x = x.get(self._block, "x")
-                offset_x = robot_x - block_x  # account for relative grasp
-                lower_x = shelf_x + offset_x
-                upper_x = lower_x + (shelf_width - block_width)
-                # Ensure bounds are valid
-                if lower_x > upper_x:
-                    lower_x, upper_x = upper_x, lower_x
-                return rng.uniform(lower_x, upper_x)
-            else:
-                # No shelf found, just return a default position
-                return 2.5
+    class GroundPickBlockOnShelfController(GroundPickBlockNotOnShelfController):
+        """Controller for grasping the block that is not on the shelf yet."""
 
-    PickController: LiftedParameterizedController = LiftedParameterizedController(
-        [robot, block],
-        GroundPickController,
-    )
+        def __init__(self, objects: Sequence[Object]) -> None:
+            super().__init__(objects)
 
-    PlaceNotOnShelfController: LiftedParameterizedController = (
+    class GroundPlaceBlockNotOnShelfController(GroundPickBlockNotOnShelfController):
+        """Controller for grasping the block that is not on the shelf yet."""
+
+        def __init__(self, objects: Sequence[Object]) -> None:
+            super().__init__(objects)
+
+    class GroundPlaceBlockOnShelfController(GroundPickBlockNotOnShelfController):
+        """Controller for grasping the block that is not on the shelf yet."""
+
+        def __init__(self, objects: Sequence[Object]) -> None:
+            super().__init__(objects)
+
+    # Lifted controllers.
+    PickBlockNotOnShelfController: LiftedParameterizedController = (
         LiftedParameterizedController(
-            [robot, block],
-            GroundPlaceNotOnShelfController,
+            [robot, block, shelf],
+            GroundPickBlockNotOnShelfController,
         )
     )
 
-    PlaceOnShelfController: LiftedParameterizedController = (
+    PickBlockOnShelfController: LiftedParameterizedController = (
         LiftedParameterizedController(
-            [robot, block],
-            GroundPlaceOnShelfController,
+            [robot, block, shelf],
+            GroundPickBlockOnShelfController,
+        )
+    )
+
+    PlaceBlockNotOnShelfController: LiftedParameterizedController = (
+        LiftedParameterizedController(
+            [robot, block, shelf],
+            GroundPlaceBlockNotOnShelfController,
+        )
+    )
+
+    PlaceBlockOnShelfController: LiftedParameterizedController = (
+        LiftedParameterizedController(
+            [robot, block, shelf],
+            GroundPlaceBlockOnShelfController,
         )
     )
 
     # Finalize the skills.
     skills = {
-        LiftedSkill(PickBlockNotOnShelfOperator, PickController),
-        LiftedSkill(PickBlockOnShelfOperator, PickController),
-        LiftedSkill(PlaceBlockNotOnShelfOperator, PlaceNotOnShelfController),
-        LiftedSkill(PlaceBlockOnShelfOperator, PlaceOnShelfController),
+        LiftedSkill(PickBlockNotOnShelfOperator, PickBlockNotOnShelfController),
+        LiftedSkill(PickBlockOnShelfOperator, PickBlockOnShelfController),
+        LiftedSkill(PlaceBlockNotOnShelfOperator, PlaceBlockNotOnShelfController),
+        LiftedSkill(PlaceBlockOnShelfOperator, PlaceBlockOnShelfController),
     }
 
     # Finalize the models.

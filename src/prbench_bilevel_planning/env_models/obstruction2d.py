@@ -21,7 +21,7 @@ from geom2drobotenvs.utils import (
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
-from prbench.envs.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
+from prbench.envs.geom2d.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
 from relational_structs import (
     GroundAtom,
     LiftedAtom,

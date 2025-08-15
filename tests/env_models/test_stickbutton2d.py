@@ -8,7 +8,7 @@ import prbench
 import pytest
 from conftest import MAKE_VIDEOS
 from gymnasium.wrappers import RecordVideo
-from prbench.envs.stickbutton2d import StickButton2DEnvSpec
+from prbench.envs.geom2d.stickbutton2d import StickButton2DEnvSpec
 
 from prbench_bilevel_planning.agent import BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models

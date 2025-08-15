@@ -20,7 +20,7 @@ from geom2drobotenvs.utils import (
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
-from prbench.envs.stickbutton2d import (
+from prbench.envs.geom2d.stickbutton2d import (
     ObjectCentricStickButton2DEnv,
     StickButton2DEnvSpec,
 )
