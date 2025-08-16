@@ -1,11 +1,9 @@
 """Bilevel planning models for the stick button 2D environment."""
 
-import abc
 from typing import Sequence
 
 import numpy as np
 from bilevel_planning.structs import (
-    GroundParameterizedController,
     LiftedParameterizedController,
     LiftedSkill,
     RelationalAbstractGoal,
@@ -13,6 +11,7 @@ from bilevel_planning.structs import (
     SesameModels,
 )
 from geom2drobotenvs.object_types import CircleType, CRVRobotType, RectangleType
+from geom2drobotenvs.structs import SE2Pose
 from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
@@ -35,6 +34,8 @@ from relational_structs import (
 )
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
 from tomsgeoms2d.structs import Geom2D
+
+from prbench_bilevel_planning.env_models import Geom2dRobotController
 
 
 def create_bilevel_planning_models(
@@ -268,125 +269,14 @@ def create_bilevel_planning_models(
     )
 
     # Controllers.
-    class _CommonGroundController(GroundParameterizedController, abc.ABC):
-        """Shared controller code between different actions."""
-
-        def __init__(
-            self,
-            objects: Sequence[Object],
-            safe_y: float = 0.8,
-        ) -> None:
-            self._robot = objects[0]
-            assert self._robot.is_instance(CRVRobotType)
-            super().__init__(objects)
-            self._current_params: float = 0.0
-            self._current_plan: list[NDArray[np.float32]] | None = None
-            self._current_state: ObjectCentricState | None = None
-            self._safe_y = safe_y
-            # Extract max deltas from action space bounds
-            assert isinstance(action_space, CRVRobotActionSpace)
-            self._max_delta_x = action_space.high[0]
-            self._max_delta_y = action_space.high[1]
-            self._max_delta_theta = action_space.high[2]
-            self._max_delta_arm = action_space.high[3]
-
-        @abc.abstractmethod
-        def _generate_waypoints(
-            self, state: ObjectCentricState
-        ) -> list[tuple[float, float, float, float]]:
-            """Generate a waypoint plan with x, y, theta, arm values."""
-
-        @abc.abstractmethod
-        def _get_vacuum_actions(self) -> tuple[float, float]:
-            """Get vacuum actions for during and after waypoint movement."""
-
-        def _waypoints_to_plan(
-            self,
-            state: ObjectCentricState,
-            waypoints: list[tuple[float, float, float, float]],
-            vacuum_during_plan: float,
-        ) -> list[NDArray[np.float32]]:
-            current_pos = (
-                state.get(self._robot, "x"),
-                state.get(self._robot, "y"),
-                state.get(self._robot, "theta"),
-                state.get(self._robot, "arm_joint"),
-            )
-            waypoints = [current_pos] + waypoints
-            plan: list[NDArray[np.float32]] = []
-            for start, end in zip(waypoints[:-1], waypoints[1:]):
-                if np.allclose(start, end):
-                    continue
-                total_dx = end[0] - start[0]
-                total_dy = end[1] - start[1]
-                total_dtheta = end[2] - start[2]
-                total_darm = end[3] - start[3]
-                num_steps = int(
-                    max(
-                        np.ceil(abs(total_dx) / self._max_delta_x),
-                        np.ceil(abs(total_dy) / self._max_delta_y),
-                        np.ceil(abs(total_dtheta) / self._max_delta_theta),
-                        np.ceil(abs(total_darm) / self._max_delta_arm),
-                    )
-                )
-                dx = total_dx / num_steps
-                dy = total_dy / num_steps
-                dtheta = total_dtheta / num_steps
-                darm = total_darm / num_steps
-                action = np.array(
-                    [dx, dy, dtheta, darm, vacuum_during_plan], dtype=np.float32
-                )
-                for _ in range(num_steps):
-                    plan.append(action)
-
-            return plan
-
-        def reset(self, x: ObjectCentricState, params: float) -> None:
-            self._current_params = params
-            self._current_plan = None
-            self._current_state = x
-
-        def terminated(self) -> bool:
-            return self._current_plan is not None and len(self._current_plan) == 0
-
-        def step(self) -> NDArray[np.float32]:
-            assert self._current_state is not None
-            if self._current_plan is None:
-                self._current_plan = self._generate_plan(self._current_state)
-            return self._current_plan.pop(0)
-
-        def observe(self, x: ObjectCentricState) -> None:
-            self._current_state = x
-
-        def _generate_plan(self, x: ObjectCentricState) -> list[NDArray[np.float32]]:
-            waypoints = self._generate_waypoints(x)
-            vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
-            waypoint_plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
-            assert isinstance(action_space, CRVRobotActionSpace)
-            plan_suffix: list[NDArray[np.float32]] = [
-                # Change the vacuum.
-                np.array([0, 0, 0, 0, vacuum_after_plan], dtype=np.float32),
-            ]
-            return waypoint_plan + plan_suffix
-
-    class GroundPickStickController(GroundParameterizedController):
+    class GroundPickStickController(Geom2dRobotController):
         """Controller for grasping the stick when the robot's hand is free."""
 
         def __init__(self, objects: Sequence[Object]) -> None:
-            self._robot = objects[0]
-            self._stick = objects[1]
-            assert self._robot.is_instance(CRVRobotType)
-            assert self._stick.is_instance(RectangleType)
-            super().__init__(objects)
-            self._current_params: tuple[float, float] = (0.0, 0.0)
-            self._current_plan: list[NDArray[np.float32]] | None = None
-            self._current_state: ObjectCentricState | None = None
-            # Extract max deltas from action space bounds
             assert isinstance(action_space, CRVRobotActionSpace)
-            self._max_delta_x = action_space.high[0]
-            self._max_delta_y = action_space.high[1]
-            self._max_delta_theta = action_space.high[2]
-            self._max_delta_arm = action_space.high[3]
+            super().__init__(objects, action_space)
+            self._stick = objects[1]
+            assert self._stick.is_instance(RectangleType)
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
@@ -398,29 +288,14 @@ def create_bilevel_planning_models(
             arm_length = rng.uniform(min_arm_length, max_arm_length)
             return (grasp_ratio, arm_length)
 
-        def reset(self, x: ObjectCentricState, params: tuple[float, float]) -> None:
-            self._current_params = params
-            self._current_plan = None
-            self._current_state = x
-
-        def terminated(self) -> bool:
-            return self._current_plan is not None and len(self._current_plan) == 0
-
-        def step(self) -> NDArray[np.float32]:
-            # Always extend the arm first before planning
-            assert self._current_state is not None
-            if self._current_plan is None:
-                self._current_plan = self._generate_plan(self._current_state)
-            return self._current_plan.pop(0)
-
-        def observe(self, x: ObjectCentricState) -> None:
-            self._current_state = x
-
         def _calculate_grasp_point(
             self, state: ObjectCentricState
         ) -> tuple[float, float]:
             """Calculate the actual grasp point based on ratio parameter."""
-            grasp_ratio, _ = self._current_params
+            if isinstance(self._current_params, tuple):
+                grasp_ratio, _ = self._current_params
+            else:
+                raise ValueError("GroundPickStickController requires tuple parameters")
 
             # Get stick properties
             stick_x = state.get(self._stick, "x")
@@ -461,7 +336,10 @@ def create_bilevel_planning_models(
             self, state: ObjectCentricState, grasp_x: float, grasp_y: float
         ) -> tuple[float, float, float]:
             """Calculate robot position and orientation to reach grasp point."""
-            _, desired_arm_length = self._current_params
+            if isinstance(self._current_params, tuple):
+                _, desired_arm_length = self._current_params
+            else:
+                raise ValueError("GroundPickStickController requires tuple parameters")
 
             # Get stick properties
             stick_x = state.get(self._stick, "x")
@@ -495,7 +373,7 @@ def create_bilevel_planning_models(
 
         def _generate_waypoints(
             self, state: ObjectCentricState
-        ) -> list[tuple[float, float, float, float]]:
+        ) -> list[tuple[SE2Pose, float]]:
             robot_x = state.get(self._robot, "x")
             robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
@@ -507,81 +385,35 @@ def create_bilevel_planning_models(
             target_x, target_y, target_theta = self._calculate_robot_position(
                 state, grasp_x, grasp_y
             )
-            _, desired_arm_length = self._current_params
+            if isinstance(self._current_params, tuple):
+                _, desired_arm_length = self._current_params
+            else:
+                raise ValueError("GroundPickStickController requires tuple parameters")
 
             return [
                 # Start by moving the arm inside the robot's base
-                (robot_x, safe_y, robot_theta, robot_radius),
+                (SE2Pose(robot_x, safe_y, robot_theta), robot_radius),
                 # Start by moving to safe height with current orientation
-                (robot_x, safe_y, robot_theta, robot_radius),
+                (SE2Pose(robot_x, safe_y, robot_theta), robot_radius),
                 # Move to target x position at safe height
-                (target_x, safe_y, robot_theta, robot_radius),
+                (SE2Pose(target_x, safe_y, robot_theta), robot_radius),
                 # Orient towards the stick
-                (target_x, safe_y, target_theta, robot_radius),
+                (SE2Pose(target_x, safe_y, target_theta), robot_radius),
                 # Move down to grasp position
-                (target_x, target_y, target_theta, robot_radius),
+                (SE2Pose(target_x, target_y, target_theta), robot_radius),
                 # Extend arm to desired length
-                (target_x, target_y, target_theta, desired_arm_length),
+                (SE2Pose(target_x, target_y, target_theta), desired_arm_length),
             ]
 
-        def _waypoints_to_plan(
-            self,
-            state: ObjectCentricState,
-            waypoints: list[tuple[float, float, float, float]],
-            vacuum_during_plan: float,
-        ) -> list[NDArray[np.float32]]:
-            current_pos = (
-                state.get(self._robot, "x"),
-                state.get(self._robot, "y"),
-                state.get(self._robot, "theta"),
-                state.get(self._robot, "arm_joint"),
-            )
-            waypoints = [current_pos] + waypoints
-            plan: list[NDArray[np.float32]] = []
-            for start, end in zip(waypoints[:-1], waypoints[1:]):
-                if np.allclose(start, end):
-                    continue
-                total_dx = end[0] - start[0]
-                total_dy = end[1] - start[1]
-                total_dtheta = end[2] - start[2]
-                total_darm = end[3] - start[3]
-                num_steps = int(
-                    max(
-                        np.ceil(abs(total_dx) / self._max_delta_x),
-                        np.ceil(abs(total_dy) / self._max_delta_y),
-                        np.ceil(abs(total_dtheta) / self._max_delta_theta),
-                        np.ceil(abs(total_darm) / self._max_delta_arm),
-                    )
-                )
-                dx = total_dx / num_steps
-                dy = total_dy / num_steps
-                dtheta = total_dtheta / num_steps
-                darm = total_darm / num_steps
-                action = np.array(
-                    [dx, dy, dtheta, darm, vacuum_during_plan], dtype=np.float32
-                )
-                for _ in range(num_steps):
-                    plan.append(action)
+        def _get_vacuum_actions(self) -> tuple[float, float]:
+            return 0.0, 1.0
 
-            return plan
-
-        def _generate_plan(self, x: ObjectCentricState) -> list[NDArray[np.float32]]:
-            waypoints = self._generate_waypoints(x)
-            vacuum_during_plan = 0.0  # Vacuum OFF during movement
-            vacuum_after_plan = 1.0  # Vacuum ON after reaching grasp position
-            waypoint_plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
-            assert isinstance(action_space, CRVRobotActionSpace)
-            plan_suffix: list[NDArray[np.float32]] = [
-                # Change the vacuum to grasp
-                np.array([0, 0, 0, 0, vacuum_after_plan], dtype=np.float32),
-            ]
-            return waypoint_plan + plan_suffix
-
-    class GroundPlaceStickController(_CommonGroundController):
+    class GroundPlaceStickController(Geom2dRobotController):
         """Controller for releasing the stick."""
 
-        def __init__(self, objects: Sequence[Object], **kwargs) -> None:
-            super().__init__(objects, **kwargs)
+        def __init__(self, objects: Sequence[Object]) -> None:
+            assert isinstance(action_space, CRVRobotActionSpace)
+            super().__init__(objects, action_space)
             self._stick = objects[1]
             assert self._stick.is_instance(RectangleType)
 
@@ -594,7 +426,7 @@ def create_bilevel_planning_models(
 
         def _generate_waypoints(
             self, state: ObjectCentricState
-        ) -> list[tuple[float, float, float, float]]:
+        ) -> list[tuple[SE2Pose, float]]:
             robot_x = state.get(self._robot, "x")
             robot_y = state.get(self._robot, "y")
             robot_base_radius = state.get(self._robot, "base_radius")
@@ -602,17 +434,18 @@ def create_bilevel_planning_models(
 
             return [
                 # Just move the arm back
-                (robot_x, robot_y, robot_theta, robot_base_radius),
+                (SE2Pose(robot_x, robot_y, robot_theta), robot_base_radius),
             ]
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 0.0, 0.0
 
-    class GroundRobotPressButtonController(_CommonGroundController):
+    class GroundRobotPressButtonController(Geom2dRobotController):
         """Controller for pressing a button directly with the robot."""
 
-        def __init__(self, objects: Sequence[Object], **kwargs) -> None:
-            super().__init__(objects, **kwargs)
+        def __init__(self, objects: Sequence[Object]) -> None:
+            assert isinstance(action_space, CRVRobotActionSpace)
+            super().__init__(objects, action_space)
             self._button = objects[1]
             assert self._button.is_instance(CircleType)
 
@@ -624,7 +457,7 @@ def create_bilevel_planning_models(
 
         def _generate_waypoints(
             self, state: ObjectCentricState
-        ) -> list[tuple[float, float, float, float]]:
+        ) -> list[tuple[SE2Pose, float]]:
             robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
             button_x = state.get(self._button, "x")
@@ -637,17 +470,18 @@ def create_bilevel_planning_models(
 
             return [
                 # Move down so robot base overlaps with button
-                (target_x, target_y, robot_theta, robot_radius),
+                (SE2Pose(target_x, target_y, robot_theta), robot_radius),
             ]
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 0.0, 0.0
 
-    class GroundStickPressButtonController(_CommonGroundController):
+    class GroundStickPressButtonController(Geom2dRobotController):
         """Controller for pressing a button using the stick."""
 
-        def __init__(self, objects: Sequence[Object], **kwargs) -> None:
-            super().__init__(objects, **kwargs)
+        def __init__(self, objects: Sequence[Object]) -> None:
+            assert isinstance(action_space, CRVRobotActionSpace)
+            super().__init__(objects, action_space)
             self._stick = objects[1]
             self._button = objects[2]
             assert self._stick.is_instance(RectangleType)
@@ -661,7 +495,7 @@ def create_bilevel_planning_models(
 
         def _generate_waypoints(
             self, state: ObjectCentricState
-        ) -> list[tuple[float, float, float, float]]:
+        ) -> list[tuple[SE2Pose, float]]:
             """Assume we always use the stick far end to press the button."""
             robot_x = state.get(self._robot, "x")
             robot_y = state.get(self._robot, "y")
@@ -682,7 +516,7 @@ def create_bilevel_planning_models(
 
             return [
                 # Move down to press button with stick
-                (target_x, target_y, robot_theta, robot_arm_joint),
+                (SE2Pose(target_x, target_y, robot_theta), robot_arm_joint),
             ]
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
