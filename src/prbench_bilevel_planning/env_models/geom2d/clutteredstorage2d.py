@@ -19,7 +19,6 @@ from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
     run_motion_planning_for_crv_robot,
-    state_has_collision
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
@@ -39,7 +38,9 @@ from relational_structs import (
 )
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
 
-from prbench_bilevel_planning.env_models import Geom2dRobotController
+from prbench_bilevel_planning.env_models.geom2d.geom2d_utils import (
+    Geom2dRobotController,
+)
 
 
 def create_bilevel_planning_models(
@@ -286,14 +287,13 @@ def create_bilevel_planning_models(
             # and (shelf_height - block_height)
             full_state = x.copy()
             full_state.data.update(static_obj_state.data)
-            while True:
-                relative_dx = rng.uniform(0.01, 0.99)
-                relative_dy = rng.uniform(0.01, 0.99)
+            relative_dx = rng.uniform(0.01, 0.99)
+            relative_dy = rng.uniform(0.01, 0.99)
             return (relative_dx, relative_dy)
-        
+
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 1.0, 0.0
-        
+
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[SE2Pose, float]]:
@@ -313,14 +313,22 @@ def create_bilevel_planning_models(
             shelf_width = state.get(self._shelf, "width")
             shelf_y = state.get(self._shelf, "y")
             shelf_height = state.get(self._shelf, "height")
-            block_desired_x = shelf_x + (shelf_width - block_width) * self._current_params[0]
-            block_desired_y = shelf_y + (shelf_height - block_height) * self._current_params[1]
+            assert isinstance(
+                self._current_params, tuple
+            ), "PlaceBlock expects tuple params"
+            block_desired_x = (
+                shelf_x + (shelf_width - block_width) * self._current_params[0]
+            )
+            block_desired_y = (
+                shelf_y + (shelf_height - block_height) * self._current_params[1]
+            )
             final_dx = block_desired_x - block_x
             final_dy = block_desired_y - block_y
 
             pre_place_robot_x = robot_x + final_dx
-            pre_place_robot_y = min(robot_y + final_dy, \
-                                    shelf_y - robot_arm_length - robot_gripper_width)
+            pre_place_robot_y = min(
+                robot_y + final_dy, shelf_y - robot_arm_length - robot_gripper_width
+            )
             pre_place_pose = SE2Pose(pre_place_robot_x, pre_place_robot_y, np.pi / 2)
 
             # Plan collision-free waypoints to the target pose
@@ -345,7 +353,7 @@ def create_bilevel_planning_models(
                 final_waypoints.append(current_wp)
 
             return final_waypoints
-        
+
     # Lifted controllers.
     PickBlockNotOnShelfController: LiftedParameterizedController = (
         LiftedParameterizedController(

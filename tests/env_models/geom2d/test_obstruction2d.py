@@ -8,7 +8,7 @@ from gymnasium.wrappers import RecordVideo
 
 from prbench_bilevel_planning.agent import BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
-from prbench_bilevel_planning.env_models.obstruction2d import (
+from prbench_bilevel_planning.env_models.geom2d.obstruction2d import (
     get_robot_transfer_position,
 )
 
