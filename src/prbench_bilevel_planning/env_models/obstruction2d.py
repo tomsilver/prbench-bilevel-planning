@@ -1,11 +1,9 @@
 """Bilevel planning models for the obstruction 2D environment."""
 
-import abc
 from typing import Sequence
 
 import numpy as np
 from bilevel_planning.structs import (
-    GroundParameterizedController,
     LiftedParameterizedController,
     LiftedSkill,
     RelationalAbstractGoal,
@@ -15,13 +13,14 @@ from bilevel_planning.structs import (
 from geom2drobotenvs.concepts import is_on
 from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
 from geom2drobotenvs.object_types import CRVRobotType, RectangleType
+from geom2drobotenvs.structs import SE2Pose
 from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
-from prbench.envs.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
+from prbench.envs.geom2d.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
 from relational_structs import (
     GroundAtom,
     LiftedAtom,
@@ -32,6 +31,8 @@ from relational_structs import (
     Variable,
 )
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
+
+from prbench_bilevel_planning.env_models import Geom2dRobotController
 
 
 def create_bilevel_planning_models(
@@ -139,72 +140,59 @@ def create_bilevel_planning_models(
     )
 
     # Controllers.
-    class _CommonGroundController(GroundParameterizedController, abc.ABC):
-        """Shared controller code between picking and placing."""
+    class GroundPickController(Geom2dRobotController):
+        """Controller for picking a block when the robot's hand is free.
 
-        def __init__(
-            self,
-            objects: Sequence[Object],
-            safe_y: float = 0.8,
-            max_delta: float = 0.025,
-        ) -> None:
-            robot, block = objects
-            assert robot.is_instance(CRVRobotType)
-            assert block.is_instance(RectangleType)
-            self._robot = robot
-            self._block = block
-            super().__init__(objects)
-            self._current_params: float = 0.0  # different meanings for subclasses
-            self._current_plan: list[NDArray[np.float32]] | None = None
-            self._current_state: ObjectCentricState | None = None
-            self._safe_y = safe_y
-            self._max_delta = max_delta
+        This controller uses waypoints rather than doing motion planning. This is just
+        because the environment is simple enough where waypoints should always work.
 
-        @abc.abstractmethod
+        The parameters for this controller represent the grasp x position RELATIVE to
+        the center of the block.
+        """
+
+        def __init__(self, objects: Sequence[Object]) -> None:
+            assert isinstance(action_space, CRVRobotActionSpace)
+            super().__init__(objects, action_space)
+            self._block = objects[1]
+            assert self._block.is_instance(RectangleType)
+
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> float:
+            gripper_height = x.get(self._robot, "gripper_height")
+            block_width = x.get(self._block, "width")
+            params = rng.uniform(-gripper_height / 2, block_width + gripper_height / 2)
+            return params
+
         def _generate_waypoints(
             self, state: ObjectCentricState
-        ) -> list[tuple[float, float]]:
-            """Generate a waypoint plan."""
+        ) -> list[tuple[SE2Pose, float]]:
+            robot_x = state.get(self._robot, "x")
+            robot_theta = state.get(self._robot, "theta")
+            robot_arm_joint = state.get(self._robot, "arm_joint")
+            block_x = state.get(self._block, "x")
+            if isinstance(self._current_params, (tuple, list)):
+                relative_offset = self._current_params[0]
+            else:
+                relative_offset = self._current_params
+            target_x, target_y = get_robot_transfer_position(
+                self._block,
+                state,
+                block_x,
+                robot_arm_joint,
+                relative_x_offset=relative_offset,
+            )
+            return [
+                # Start by moving to safe height (may already be there).
+                (SE2Pose(robot_x, self._safe_y, robot_theta), robot_arm_joint),
+                # Move to above the target block, offset by params.
+                (SE2Pose(target_x, self._safe_y, robot_theta), robot_arm_joint),
+                # Move down to grasp.
+                (SE2Pose(target_x, target_y, robot_theta), robot_arm_joint),
+            ]
 
-        @abc.abstractmethod
         def _get_vacuum_actions(self) -> tuple[float, float]:
-            """Get vacuum actions for during and after waypoint movement."""
-
-        def _waypoints_to_plan(
-            self,
-            state: ObjectCentricState,
-            waypoints: list[tuple[float, float]],
-            vacuum_during_plan: float,
-        ) -> list[NDArray[np.float32]]:
-            current_pos = (state.get(self._robot, "x"), state.get(self._robot, "y"))
-            waypoints = [current_pos] + waypoints
-            plan: list[NDArray[np.float32]] = []
-            for start, end in zip(waypoints[:-1], waypoints[1:]):
-                if np.allclose(start, end):
-                    continue
-                total_dx = end[0] - start[0]
-                total_dy = end[1] - start[1]
-                num_steps = int(
-                    max(
-                        np.ceil(abs(total_dx) / self._max_delta),
-                        np.ceil(abs(total_dy) / self._max_delta),
-                    )
-                )
-                dx = total_dx / num_steps
-                dy = total_dy / num_steps
-                action = np.array([dx, dy, 0, 0, vacuum_during_plan], dtype=np.float32)
-                for _ in range(num_steps):
-                    plan.append(action)
-
-            return plan
-
-        def reset(self, x: ObjectCentricState, params: float) -> None:
-            self._current_params = params
-            self._current_plan = None
-            self._current_state = x
-
-        def terminated(self) -> bool:
-            return self._current_plan is not None and len(self._current_plan) == 0
+            return 0.0, 1.0
 
         def step(self) -> NDArray[np.float32]:
             # Always extend the arm first before planning.
@@ -212,12 +200,7 @@ def create_bilevel_planning_models(
             if self._current_state.get(self._robot, "arm_joint") <= 0.15:
                 assert isinstance(action_space, CRVRobotActionSpace)
                 return np.array([0, 0, 0, action_space.high[3], 0], dtype=np.float32)
-            if self._current_plan is None:
-                self._current_plan = self._generate_plan(self._current_state)
-            return self._current_plan.pop(0)
-
-        def observe(self, x: ObjectCentricState) -> None:
-            self._current_state = x
+            return super().step()
 
         def _generate_plan(self, x: ObjectCentricState) -> list[NDArray[np.float32]]:
             waypoints = self._generate_waypoints(x)
@@ -234,50 +217,7 @@ def create_bilevel_planning_models(
             ]
             return waypoint_plan + plan_suffix
 
-    class GroundPickController(_CommonGroundController):
-        """Controller for picking a block when the robot's hand is free.
-
-        This controller uses waypoints rather than doing motion planning. This is just
-        because the environment is simple enough where waypoints should always work.
-
-        The parameters for this controller represent the grasp x position RELATIVE to
-        the center of the block.
-        """
-
-        def sample_parameters(
-            self, x: ObjectCentricState, rng: np.random.Generator
-        ) -> float:
-            gripper_height = x.get(self._robot, "gripper_height")
-            block_width = x.get(self._block, "width")
-            params = rng.uniform(-gripper_height / 2, block_width + gripper_height / 2)
-            return params
-
-        def _generate_waypoints(
-            self, state: ObjectCentricState
-        ) -> list[tuple[float, float]]:
-            robot_x = state.get(self._robot, "x")
-            block_x = state.get(self._block, "x")
-            robot_arm_joint = state.get(self._robot, "arm_joint")
-            target_x, target_y = get_robot_transfer_position(
-                self._block,
-                state,
-                block_x,
-                robot_arm_joint,
-                relative_x_offset=self._current_params,
-            )
-            return [
-                # Start by moving to safe height (may already be there).
-                (robot_x, self._safe_y),
-                # Move to above the target block, offset by params.
-                (target_x, self._safe_y),
-                # Move down to grasp.
-                (target_x, target_y),
-            ]
-
-        def _get_vacuum_actions(self) -> tuple[float, float]:
-            return 0.0, 1.0
-
-    class _GroundPlaceController(_CommonGroundController):
+    class _GroundPlaceController(Geom2dRobotController):
         """Controller for placing a held block.
 
         This controller uses waypoints rather than doing motion planning. This is just
@@ -287,12 +227,22 @@ def create_bilevel_planning_models(
         robot will release the held block.
         """
 
+        def __init__(self, objects: Sequence[Object]) -> None:
+            assert isinstance(action_space, CRVRobotActionSpace)
+            super().__init__(objects, action_space)
+            self._block = objects[1]
+            assert self._block.is_instance(RectangleType)
+
         def _generate_waypoints(
             self, state: ObjectCentricState
-        ) -> list[tuple[float, float]]:
+        ) -> list[tuple[SE2Pose, float]]:
             robot_x = state.get(self._robot, "x")
+            robot_theta = state.get(self._robot, "theta")
             robot_arm_joint = state.get(self._robot, "arm_joint")
-            placement_x = self._current_params
+            if isinstance(self._current_params, (tuple, list)):
+                placement_x = self._current_params[0]
+            else:
+                placement_x = self._current_params
             target_x, target_y = get_robot_transfer_position(
                 self._block,
                 state,
@@ -302,15 +252,38 @@ def create_bilevel_planning_models(
 
             return [
                 # Start by moving to safe height (may already be there).
-                (robot_x, self._safe_y),
+                (SE2Pose(robot_x, self._safe_y, robot_theta), robot_arm_joint),
                 # Move to above the target position.
-                (target_x, self._safe_y),
+                (SE2Pose(target_x, self._safe_y, robot_theta), robot_arm_joint),
                 # Move down to place.
-                (target_x, target_y),
+                (SE2Pose(target_x, target_y, robot_theta), robot_arm_joint),
             ]
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 1.0, 0.0
+
+        def step(self) -> NDArray[np.float32]:
+            # Always extend the arm first before planning.
+            assert self._current_state is not None
+            if self._current_state.get(self._robot, "arm_joint") <= 0.15:
+                assert isinstance(action_space, CRVRobotActionSpace)
+                return np.array([0, 0, 0, action_space.high[3], 0], dtype=np.float32)
+            return super().step()
+
+        def _generate_plan(self, x: ObjectCentricState) -> list[NDArray[np.float32]]:
+            waypoints = self._generate_waypoints(x)
+            vacuum_during_plan, vacuum_after_plan = self._get_vacuum_actions()
+            waypoint_plan = self._waypoints_to_plan(x, waypoints, vacuum_during_plan)
+            assert isinstance(action_space, CRVRobotActionSpace)
+            plan_suffix: list[NDArray[np.float32]] = [
+                # Change the vacuum.
+                np.array([0, 0, 0, 0, vacuum_after_plan], dtype=np.float32),
+                # Move up slightly to break contact.
+                np.array(
+                    [0, action_space.high[1], 0, 0, vacuum_after_plan], dtype=np.float32
+                ),
+            ]
+            return waypoint_plan + plan_suffix
 
     class GroundPlaceOnTableController(_GroundPlaceController):
         """Controller for placing a held block on the table."""
@@ -318,6 +291,7 @@ def create_bilevel_planning_models(
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
         ) -> float:
+            del x  # unused
             world_min_x = 0.0
             world_max_x = 1.0
             return rng.uniform(world_min_x, world_max_x)
