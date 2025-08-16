@@ -178,4 +178,13 @@ def test_clutteredstorage2d_skills():
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
     assert pred_name_to_pred["Holding"]([robot, block0]) in abstract_state1.atoms
+
+    # Then place the block on shelf
+    place_block_on_shelf = skill_name_to_skill["PlaceBlockOnShelf"]
+    place_block_on_shelf_skill = place_block_on_shelf.ground((robot, block0, shelf))
+    obs2 = _skill_test_helper(place_block_on_shelf_skill, env_models, env, obs1)
+    state2 = env_models.observation_to_state(obs2)
+    abstract_state1 = env_models.state_abstractor(state2)
+    assert pred_name_to_pred["Holding"]([robot, block0]) not in abstract_state1.atoms
+    assert pred_name_to_pred["OnShelf"]([block0, shelf]) in abstract_state1.atoms
     env.close()
