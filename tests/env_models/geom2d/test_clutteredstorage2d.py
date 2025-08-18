@@ -178,13 +178,24 @@ def test_clutteredstorage2d_skills():
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
     assert pred_name_to_pred["Holding"]([robot, block0]) in abstract_state1.atoms
+    img = env.render()
+    iio.imsave(f"debug/0.png", img)
 
     # Then place the block on shelf
-    # place_block_on_shelf = skill_name_to_skill["PlaceBlockOnShelf"]
-    # place_block_on_shelf_skill = place_block_on_shelf.ground((robot, block0, shelf))
-    # obs2 = _skill_test_helper(place_block_on_shelf_skill, env_models, env, obs1)
-    # state2 = env_models.observation_to_state(obs2)
-    # abstract_state1 = env_models.state_abstractor(state2)
-    # assert pred_name_to_pred["Holding"]([robot, block0]) not in abstract_state1.atoms
-    # assert pred_name_to_pred["OnShelf"]([block0, shelf]) in abstract_state1.atoms
+    state2 = state1.copy()
+    # state2.set(robot, "arm_joint", 0.8)  # retract arm before placing
+    # state2.set(robot, "x", 3.6589)
+    # state2.set(robot, "y", 1.805)
+    # state2.set(robot, "theta", np.pi / 2)
+    reset_option = {"init_state": state2}
+    env.reset(options=reset_option)
+    img = env.render()
+    iio.imsave(f"debug/1.png", img)
+    place_block_on_shelf = skill_name_to_skill["PlaceBlockOnShelf"]
+    place_block_on_shelf_skill = place_block_on_shelf.ground((robot, block0, shelf))
+    obs2 = _skill_test_helper(place_block_on_shelf_skill, env_models, env, obs1, debug=True)
+    state2 = env_models.observation_to_state(obs2)
+    abstract_state1 = env_models.state_abstractor(state2)
+    assert pred_name_to_pred["Holding"]([robot, block0]) not in abstract_state1.atoms
+    assert pred_name_to_pred["OnShelf"]([block0, shelf]) in abstract_state1.atoms
     env.close()
