@@ -10,7 +10,7 @@ from bilevel_planning.structs import (
     RelationalAbstractState,
     SesameModels,
 )
-from geom2drobotenvs.concepts import is_inside
+from geom2drobotenvs.concepts import is_inside_shelf
 from geom2drobotenvs.object_types import CRVRobotType
 from geom2drobotenvs.structs import (
     SE2Pose,
@@ -100,7 +100,7 @@ def create_bilevel_planning_models(
             atoms.add(GroundAtom(HandEmpty, [robot]))
 
         for block in target_blocks:
-            if is_inside(x, block, shelf, {}):
+            if is_inside_shelf(x, block, shelf, {}):
                 atoms.add(GroundAtom(OnShelf, [block, shelf]))
             else:
                 atoms.add(GroundAtom(NotOnShelf, [block, shelf]))
@@ -189,9 +189,9 @@ def create_bilevel_planning_models(
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
         ) -> tuple[float, float]:
-            # Sample grasp ratio on the width of the block
-            # <0.0: custom frame dy < 0
-            # >0.0: custom frame dy > 0
+            # Sample grasp ratio on the height of the block
+            # <0.0: custom frame dx < 0
+            # >0.0: custom frame dx > 0
             while True:
                 grasp_ratio = rng.uniform(-1.0, 1.0)
                 if grasp_ratio != 0.0:
@@ -221,15 +221,20 @@ def create_bilevel_planning_models(
             block_x = state.get(self._block, "x")
             block_y = state.get(self._block, "y")
             block_theta = state.get(self._block, "theta")
-            rel_point_x = block_x
-            rel_point_y = block_y + state.get(self._block, "height") / 2
-            rel_point = SE2Pose(rel_point_x, rel_point_y, block_theta)
+            rel_point_dx = state.get(self._block, "width") / 2
+            rel_point_dy = -state.get(self._robot, "gripper_height") / 2
+            rel_point = SE2Pose(block_x, block_y, block_theta) * SE2Pose(
+                rel_point_dx, rel_point_dy, 0.0
+            )
 
             # Relative SE2 pose w.r.t the grasp frame
-            custom_dx = abs(grasp_ratio) * state.get(self._block, "width")
-            custom_dy = state.get(self._block, "height") / 2 + arm_length
-            custom_dy *= -1 if grasp_ratio < 0 else 1
-            custom_dtheta = np.pi / 2 if grasp_ratio < 0 else -np.pi / 2
+            custom_dx = state.get(self._block, "width") / 2 + arm_length + \
+                state.get(self._robot, "gripper_width")
+            custom_dx *= -1 if grasp_ratio < 0 else 1 # Right or left side grasp
+            # Custom dy is always positive.
+            custom_dy = abs(grasp_ratio) * (state.get(self._block, "height") + \
+                state.get(self._robot, "gripper_height"))
+            custom_dtheta = 0.0 if grasp_ratio < 0 else np.pi
             custom_pose = SE2Pose(custom_dx, custom_dy, custom_dtheta)
 
             target_se2_pose = rel_point * custom_pose
@@ -276,8 +281,14 @@ def create_bilevel_planning_models(
 
             return final_waypoints
 
-    class GroundPlaceBlockController(GroundPickBlockController):
-        """Controller for placing the block not on the shelf."""
+    class GroundPlaceBlockController(Geom2dRobotController):
+        """Controller for placing the block on the shelf."""
+
+        def __init__(self, objects: Sequence[Object]) -> None:
+            assert isinstance(action_space, CRVRobotActionSpace)
+            super().__init__(objects, action_space)
+            self._block = objects[1]
+            self._shelf = objects[2]
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
@@ -302,39 +313,48 @@ def create_bilevel_planning_models(
             robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
             robot_arm_length = state.get(self._robot, "arm_length")
-            robot_gripper_width = state.get(self._robot, "gripper_width")
             block_x = state.get(self._block, "x")
             block_y = state.get(self._block, "y")
             block_width = state.get(self._block, "width")
             block_height = state.get(self._block, "height")
+            block_center = SE2Pose(
+                block_x, block_y, state.get(self._block, "theta")
+            ) * SE2Pose(
+                block_width / 2, block_height / 2, 0.0
+            )
+            block_x_center = block_center.x
+            block_y_center = block_center.y
 
             # Calculate pre-place position based on Shelf position
-            shelf_x = state.get(self._shelf, "x")
-            shelf_width = state.get(self._shelf, "width")
-            shelf_y = state.get(self._shelf, "y")
-            shelf_height = state.get(self._shelf, "height")
+            shelf_x = state.get(self._shelf, "x1")
+            shelf_width = state.get(self._shelf, "width1")
+            shelf_y = state.get(self._shelf, "y1")
+            shelf_height = state.get(self._shelf, "height1")
             assert isinstance(
                 self._current_params, tuple
             ), "PlaceBlock expects tuple params"
-            block_desired_x = (
-                shelf_x + (shelf_width - block_width) * self._current_params[0]
+            # x can be anywhere in the shelf width (no collision)
+            block_desired_x_center = (
+                shelf_x + (shelf_width - block_height) * self._current_params[0] \
+                + block_height / 2
             )
-            block_desired_y = (
-                shelf_y + (shelf_height - block_height) * self._current_params[1]
+            # y is confined to inside the shelf height (no collision)
+            y_min = min(shelf_y + block_width / 2, shelf_y + shelf_height - block_width / 2)
+            y_max = max(shelf_y + block_width / 2, shelf_y + shelf_height - block_width / 2)
+            block_desired_y_center = (
+                y_min + (y_max - y_min) * self._current_params[1]
             )
-            final_dx = block_desired_x - block_x
-            final_dy = block_desired_y - block_y
+
+            final_dx = block_desired_x_center - block_x_center
+            final_dy = block_desired_y_center - block_y_center
 
             pre_place_robot_x = robot_x + final_dx
-            pre_place_robot_y = min(
-                robot_y + final_dy, shelf_y - robot_arm_length - robot_gripper_width
-            )
+            pre_place_robot_y = robot_y + final_dy - robot_arm_length
             pre_place_pose = SE2Pose(pre_place_robot_x, pre_place_robot_y, np.pi / 2)
 
             # Plan collision-free waypoints to the target pose
             # We set the arm to be the shortest length during motion planning
             mp_state = state.copy()
-            mp_state.set(self._robot, "arm_joint", robot_arm_length)
             assert isinstance(action_space, CRVRobotActionSpace)
             collision_free_waypoints = run_motion_planning_for_crv_robot(
                 mp_state, self._robot, pre_place_pose, action_space
