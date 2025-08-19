@@ -19,6 +19,7 @@ from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
     run_motion_planning_for_crv_robot,
+    get_tool_tip_position
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
@@ -222,9 +223,8 @@ def create_bilevel_planning_models(
             block_y = state.get(self._block, "y")
             block_theta = state.get(self._block, "theta")
             rel_point_dx = state.get(self._block, "width") / 2
-            rel_point_dy = -state.get(self._robot, "gripper_height") / 2
             rel_point = SE2Pose(block_x, block_y, block_theta) * SE2Pose(
-                rel_point_dx, rel_point_dy, 0.0
+                rel_point_dx, 0.0, 0.0
             )
 
             # Relative SE2 pose w.r.t the grasp frame
@@ -232,8 +232,7 @@ def create_bilevel_planning_models(
                 state.get(self._robot, "gripper_width")
             custom_dx *= -1 if grasp_ratio < 0 else 1 # Right or left side grasp
             # Custom dy is always positive.
-            custom_dy = abs(grasp_ratio) * (state.get(self._block, "height") + \
-                state.get(self._robot, "gripper_height"))
+            custom_dy = abs(grasp_ratio) * state.get(self._block, "height")
             custom_dtheta = 0.0 if grasp_ratio < 0 else np.pi
             custom_pose = SE2Pose(custom_dx, custom_dy, custom_dtheta)
 
@@ -299,7 +298,8 @@ def create_bilevel_planning_models(
             full_state = x.copy()
             full_state.data.update(static_obj_state.data)
             relative_dx = rng.uniform(0.01, 0.99)
-            relative_dy = rng.uniform(0.01, 0.99)
+            # Bias towards inside the shelf
+            relative_dy = rng.uniform(0.1, 0.95)
             return (relative_dx, relative_dy)
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
@@ -313,17 +313,16 @@ def create_bilevel_planning_models(
             robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
             robot_arm_length = state.get(self._robot, "arm_length")
+            gripper_height = state.get(self._robot, "gripper_height")
+            gripper_width = state.get(self._robot, "gripper_width")
             block_x = state.get(self._block, "x")
             block_y = state.get(self._block, "y")
+            block_theta = state.get(self._block, "theta")
             block_width = state.get(self._block, "width")
             block_height = state.get(self._block, "height")
-            block_center = SE2Pose(
-                block_x, block_y, state.get(self._block, "theta")
-            ) * SE2Pose(
-                block_width / 2, block_height / 2, 0.0
-            )
-            block_x_center = block_center.x
-            block_y_center = block_center.y
+            block_curr_center = SE2Pose(block_x, block_y, block_theta) * \
+                SE2Pose(block_width / 2, block_height / 2, 0.0)
+            _, gripper_to_block = get_suctioned_objects(state, self._robot)[0]
 
             # Calculate pre-place position based on Shelf position
             shelf_x = state.get(self._shelf, "x1")
@@ -334,9 +333,12 @@ def create_bilevel_planning_models(
                 self._current_params, tuple
             ), "PlaceBlock expects tuple params"
             # x can be anywhere in the shelf width (no collision)
+            x_min = shelf_x + gripper_height / 2
+            x_max = shelf_x + shelf_width - gripper_height / 2
+            x_min = min(x_min, x_max)
+            x_max = max(x_min, x_max)
             block_desired_x_center = (
-                shelf_x + (shelf_width - block_height) * self._current_params[0] \
-                + block_height / 2
+                x_min + (x_max - x_min) * self._current_params[0]
             )
             # y is confined to inside the shelf height (no collision)
             y_min = min(shelf_y + block_width / 2, shelf_y + shelf_height - block_width / 2)
@@ -344,33 +346,68 @@ def create_bilevel_planning_models(
             block_desired_y_center = (
                 y_min + (y_max - y_min) * self._current_params[1]
             )
+            # Note: The desired orientation depends on how is the blocked grasped.
+            # If grasping from the left side, the block should be placed with theta = np.pi / 2
+            # If grasping from the right side, the block should be placed with theta = -np.pi / 2
+            gripper_x, gripper_y = get_tool_tip_position(state, self._robot)
+            gripper_frame = SE2Pose(gripper_x, gripper_y, block_theta)
+            relative_frame = block_curr_center.inverse * gripper_frame
+            if relative_frame.x < 0:
+                # Left side grasp
+                block_desired_center = SE2Pose(
+                    block_desired_x_center, block_desired_y_center, np.pi / 2
+                )
+            else:
+                # Right side grasp
+                block_desired_center = SE2Pose(
+                    block_desired_x_center, block_desired_y_center, -np.pi / 2
+                )
+            gripper_final_desired_pose = block_desired_center * \
+                SE2Pose(-block_width / 2, -block_height / 2, 0.0) * \
+                gripper_to_block.inverse
 
-            final_dx = block_desired_x_center - block_x_center
-            final_dy = block_desired_y_center - block_y_center
+            final_robot_y = gripper_final_desired_pose.y - robot_arm_length \
+                - gripper_width
 
-            pre_place_robot_x = robot_x + final_dx
-            pre_place_robot_y = robot_y + final_dy - robot_arm_length
-            pre_place_pose = SE2Pose(pre_place_robot_x, pre_place_robot_y, np.pi / 2)
+            pre_place_robot_x = gripper_final_desired_pose.x
+            pre_place_robot_y = final_robot_y - shelf_height
+            pre_place_pose_0 = SE2Pose(pre_place_robot_x, pre_place_robot_y, np.pi / 2)
 
-            # Plan collision-free waypoints to the target pose
-            # We set the arm to be the shortest length during motion planning
-            mp_state = state.copy()
-            assert isinstance(action_space, CRVRobotActionSpace)
-            collision_free_waypoints = run_motion_planning_for_crv_robot(
-                mp_state, self._robot, pre_place_pose, action_space
-            )
-            final_waypoints: list[tuple[SE2Pose, float]] = []
             current_wp = (
                 SE2Pose(robot_x, robot_y, robot_theta),
                 state.get(self._robot, "arm_joint"),
             )
-
-            if collision_free_waypoints is not None:
-                for wp in collision_free_waypoints:
-                    final_waypoints.append((wp, robot_radius))
-            else:
+            # Plan collision-free waypoints to the target pose
+            # We set the arm to be the longest during motion planning
+            final_waypoints: list[tuple[SE2Pose, float]] = []
+            mp_state = state.copy()
+            assert isinstance(action_space, CRVRobotActionSpace)
+            collision_free_waypoints_0 = run_motion_planning_for_crv_robot(
+                mp_state, self._robot, pre_place_pose_0, action_space
+            )
+            if collision_free_waypoints_0 is None:
                 # Stay static
-                final_waypoints.append(current_wp)
+                return [current_wp]
+            for wp in collision_free_waypoints_0:
+                final_waypoints.append((wp, robot_radius))
+
+            # Stretch the arm to the desired position
+            final_waypoints.append((wp, robot_arm_length))
+
+            mp_state.set(self._robot, "x", pre_place_robot_x)
+            mp_state.set(self._robot, "y", pre_place_robot_y)
+            mp_state.set(self._robot, "theta", np.pi / 2)
+            mp_state.set(self._robot, "arm_joint", robot_arm_length)
+            pre_place_pose_1 = SE2Pose(pre_place_robot_x, final_robot_y, np.pi / 2)
+            collision_free_waypoints_1 = run_motion_planning_for_crv_robot(
+                mp_state, self._robot, pre_place_pose_1, action_space
+            )
+            if collision_free_waypoints_1 is None:
+                # Stay static
+                return [current_wp]
+            
+            for wp in collision_free_waypoints_1:
+                final_waypoints.append((wp, robot_arm_length))
 
             return final_waypoints
 
