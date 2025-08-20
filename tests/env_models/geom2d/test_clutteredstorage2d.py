@@ -1,11 +1,14 @@
 """Tests for clutteredstorage2d.py."""
 
 import time
-
+import pytest
+from conftest import MAKE_VIDEOS
+from gymnasium.wrappers import RecordVideo
 import imageio.v2 as iio
 import numpy as np
 import prbench
 
+from prbench_bilevel_planning.agent import BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
 
 prbench.register_all_environments()
@@ -145,8 +148,8 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=Fa
     return obs
 
 
-def test_clutteredstorage2d_skills():
-    """Tests for skills in the ClutteredStorage2D environment."""
+def test_clutteredstorage2d_skills_not_on_shelf():
+    """Tests for skills that operate a block not initially on shelf."""
     env = prbench.make("prbench/ClutteredStorage2D-b1-v0")
     env_models = create_bilevel_planning_models(
         "clutteredstorage2d", env.observation_space, env.action_space, num_blocks=1
@@ -154,10 +157,6 @@ def test_clutteredstorage2d_skills():
     pred_name_to_pred = {p.name: p for p in env_models.predicates}
     skill_name_to_skill = {s.operator.name: s for s in env_models.skills}
     pick_block_not_on_shelf = skill_name_to_skill["PickBlockNotOnShelf"]
-    # Other skills are available but not used in this basic test
-    # pick_block_on_shelf = skill_name_to_skill["PickBlockOnShelf"]
-    # place_block_not_on_shelf = skill_name_to_skill["PlaceBlockNotOnShelf"]
-    # place_block_on_shelf = skill_name_to_skill["PlaceBlockOnShelf"]
 
     # Test pick and place the block that is not on shelf
     obs0, _ = env.reset(seed=123)
@@ -182,15 +181,6 @@ def test_clutteredstorage2d_skills():
     assert pred_name_to_pred["Holding"]([robot, block0]) in abstract_state1.atoms
 
     # Then place the block on shelf
-    # state2 = state1.copy()
-    # state2.set(robot, "arm_joint", 0.8)  # retract arm before placing
-    # state2.set(robot, "x", 0.7056)
-    # state2.set(robot, "y", 2.4434)
-    # state2.set(robot, "theta", np.pi / 2)
-    # reset_option = {"init_state": state2}
-    # env.reset(options=reset_option)
-    # img = env.render()
-    # iio.imsave(f"debug/1.png", img)
     place_block_on_shelf = skill_name_to_skill["PlaceBlockOnShelf"]
     place_block_on_shelf_skill = place_block_on_shelf.ground((robot, block0, shelf))
     obs2 = _skill_test_helper(place_block_on_shelf_skill, env_models, env, obs1)
@@ -198,4 +188,100 @@ def test_clutteredstorage2d_skills():
     abstract_state1 = env_models.state_abstractor(state2)
     assert pred_name_to_pred["Holding"]([robot, block0]) not in abstract_state1.atoms
     assert pred_name_to_pred["OnShelf"]([block0, shelf]) in abstract_state1.atoms
+    env.close()
+
+
+def test_clutteredstorage2d_skills_on_shelf():
+    """Tests for skills that operate a block initially on shelf."""
+    env = prbench.make("prbench/ClutteredStorage2D-b7-v0")
+    env_models = create_bilevel_planning_models(
+        "clutteredstorage2d", env.observation_space, env.action_space, num_blocks=7
+    )
+    pred_name_to_pred = {p.name: p for p in env_models.predicates}
+    skill_name_to_skill = {s.operator.name: s for s in env_models.skills}
+    pick_block_on_shelf = skill_name_to_skill["PickBlockOnShelf"]
+
+    # Test pick and place the block that is not on shelf
+    obs0, _ = env.reset(seed=123)
+    state0 = env_models.observation_to_state(obs0)
+    abstract_state = env_models.state_abstractor(state0)
+    obj_name_to_obj = {o.name: o for o in abstract_state.objects}
+    robot = obj_name_to_obj["robot"]
+    block0 = obj_name_to_obj["block0"]
+    shelf = obj_name_to_obj["shelf"]
+    OnShelf = pred_name_to_pred["OnShelf"]
+    assert OnShelf([block0, shelf]) in abstract_state.atoms
+    pick_block_on_shelf_skill = pick_block_on_shelf.ground(
+        (robot, block0, shelf)
+    )
+
+    # First pick the block
+    obs1 = _skill_test_helper(pick_block_on_shelf_skill, env_models, env, obs0, params=(-0.5, 0.4))
+    state1 = env_models.observation_to_state(obs1)
+    abstract_state1 = env_models.state_abstractor(state1)
+    img = env.render()
+    iio.imsave(f"debug/1.png", img)
+    assert pred_name_to_pred["Holding"]([robot, block0]) in abstract_state1.atoms
+
+    # Then place the block not on shelf
+    place_block_not_on_shelf = skill_name_to_skill["PlaceBlockNotOnShelf"]
+    place_block_on_shelf_skill = place_block_not_on_shelf.ground((robot, block0, shelf))
+    obs2 = _skill_test_helper(place_block_on_shelf_skill, env_models, env, obs1)
+    state2 = env_models.observation_to_state(obs2)
+    abstract_state1 = env_models.state_abstractor(state2)
+    assert pred_name_to_pred["Holding"]([robot, block0]) not in abstract_state1.atoms
+    assert pred_name_to_pred["NotOnShelf"]([block0, shelf]) in abstract_state1.atoms
+    env.close()
+
+@pytest.mark.parametrize(
+    "num_blocks, max_abstract_plans, samples_per_step",
+    [
+        (1, 2, 5),
+        (3, 10, 10),
+    ],
+)
+def test_clutteredstorage2d_bilevel_planning(
+    num_blocks, max_abstract_plans, samples_per_step
+):
+    """Tests for bilevel planning in the ClutteredStorage2D environment.
+
+    Note that we only test a small number of buttons to keep tests fast. Use experiment
+    scripts to evaluate at scale.
+    """
+
+    env = prbench.make(
+        f"prbench/ClutteredStorage2D-b{num_blocks}-v0", render_mode="rgb_array"
+    )
+
+    if MAKE_VIDEOS:
+        env = RecordVideo(
+            env, "unit_test_videos", name_prefix=f"ClutteredStorage2D-b{num_blocks}"
+        )
+
+    env_models = create_bilevel_planning_models(
+        "clutteredstorage2d",
+        env.observation_space,
+        env.action_space,
+        num_blocks=num_blocks,
+    )
+    agent = BilevelPlanningAgent(
+        env_models,
+        seed=123,
+        max_abstract_plans=max_abstract_plans,
+        samples_per_step=samples_per_step,
+        planning_timeout=60.0,  # Increase timeout for more complex environment
+    )
+    obs, info = env.reset(seed=123)
+    total_reward = 0
+    agent.reset(obs, info)
+    for _ in range(3000):  # Increase max steps for more complex task
+        action = agent.step()
+        obs, reward, terminated, truncated, info = env.step(action)
+        total_reward += reward
+        agent.update(obs, reward, terminated or truncated, info)
+        if terminated or truncated:
+            break
+    else:
+        assert False, "Did not terminate successfully"
+
     env.close()

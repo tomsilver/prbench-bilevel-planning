@@ -117,6 +117,7 @@ class Geom2dRobotController(GroundParameterizedController, abc.ABC):
         ]
         return waypoint_plan + plan_suffix
 
+
 from .geom2d import Geom2dRobotController
 
 __all__ = ["create_bilevel_planning_models", "Geom2dRobotController"]

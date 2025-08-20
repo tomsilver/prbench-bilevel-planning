@@ -18,13 +18,16 @@ from geom2drobotenvs.structs import (
 from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
+    get_tool_tip_position,
+    snap_suctioned_objects,
     run_motion_planning_for_crv_robot,
-    get_tool_tip_position
+    state_has_collision
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
 from prbench.envs.geom2d.clutteredstorage2d import (
     ObjectCentricClutteredStorage2DEnv,
+    ClutteredStorage2DEnvSpec,
     ShelfType,
     TargetBlockType,
 )
@@ -52,7 +55,12 @@ def create_bilevel_planning_models(
     assert isinstance(action_space, CRVRobotActionSpace)
 
     sim = ObjectCentricClutteredStorage2DEnv(num_blocks=num_blocks)
-    static_obj_state = sim.initial_constant_state.copy()
+    env_spec = ClutteredStorage2DEnvSpec()
+    world_x_min = env_spec.world_min_x + env_spec.robot_base_radius
+    world_x_max = env_spec.world_max_x - env_spec.robot_base_radius
+    world_y_min = env_spec.world_min_y + env_spec.robot_base_radius
+    world_y_max = env_spec.world_max_y - env_spec.shelf_height \
+        - env_spec.robot_base_radius
 
     # Convert observations into states. The important thing is that states are hashable.
     def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
@@ -178,8 +186,10 @@ def create_bilevel_planning_models(
     )
 
     # Controllers.
-    class GroundPickBlockController(Geom2dRobotController):
-        """Controller for grasping the block that is not on the shelf yet."""
+    class GroundPickBlockNotOnShelfController(Geom2dRobotController):
+        """Controller for grasping the block that is not on the shelf yet.
+        The grasping point is either on the left or right side of the block.
+        """
 
         def __init__(self, objects: Sequence[Object]) -> None:
             assert isinstance(action_space, CRVRobotActionSpace)
@@ -191,8 +201,8 @@ def create_bilevel_planning_models(
             self, x: ObjectCentricState, rng: np.random.Generator
         ) -> tuple[float, float]:
             # Sample grasp ratio on the height of the block
-            # <0.0: custom frame dx < 0
-            # >0.0: custom frame dx > 0
+            # <0.0: custom frame dx/dy < 0
+            # >0.0: custom frame dx/dy > 0
             while True:
                 grasp_ratio = rng.uniform(-1.0, 1.0)
                 if grasp_ratio != 0.0:
@@ -228,9 +238,12 @@ def create_bilevel_planning_models(
             )
 
             # Relative SE2 pose w.r.t the grasp frame
-            custom_dx = state.get(self._block, "width") / 2 + arm_length + \
-                state.get(self._robot, "gripper_width")
-            custom_dx *= -1 if grasp_ratio < 0 else 1 # Right or left side grasp
+            custom_dx = (
+                state.get(self._block, "width") / 2
+                + arm_length
+                + state.get(self._robot, "gripper_width")
+            )
+            custom_dx *= -1 if grasp_ratio < 0 else 1  # Right or left side grasp
             # Custom dy is always positive.
             custom_dy = abs(grasp_ratio) * state.get(self._block, "height")
             custom_dtheta = 0.0 if grasp_ratio < 0 else np.pi
@@ -280,7 +293,7 @@ def create_bilevel_planning_models(
 
             return final_waypoints
 
-    class GroundPlaceBlockController(Geom2dRobotController):
+    class GroundPlaceBlockOnShelfController(Geom2dRobotController):
         """Controller for placing the block on the shelf."""
 
         def __init__(self, objects: Sequence[Object]) -> None:
@@ -295,8 +308,6 @@ def create_bilevel_planning_models(
             # Sample place ratio
             # w.r.t (shelf_width - block_width)
             # and (shelf_height - block_height)
-            full_state = x.copy()
-            full_state.data.update(static_obj_state.data)
             relative_dx = rng.uniform(0.01, 0.99)
             # Bias towards inside the shelf
             relative_dy = rng.uniform(0.1, 0.95)
@@ -320,8 +331,9 @@ def create_bilevel_planning_models(
             block_theta = state.get(self._block, "theta")
             block_width = state.get(self._block, "width")
             block_height = state.get(self._block, "height")
-            block_curr_center = SE2Pose(block_x, block_y, block_theta) * \
-                SE2Pose(block_width / 2, block_height / 2, 0.0)
+            block_curr_center = SE2Pose(block_x, block_y, block_theta) * SE2Pose(
+                block_width / 2, block_height / 2, 0.0
+            )
             _, gripper_to_block = get_suctioned_objects(state, self._robot)[0]
 
             # Calculate pre-place position based on Shelf position
@@ -337,15 +349,15 @@ def create_bilevel_planning_models(
             x_max = shelf_x + shelf_width - gripper_height / 2
             x_min = min(x_min, x_max)
             x_max = max(x_min, x_max)
-            block_desired_x_center = (
-                x_min + (x_max - x_min) * self._current_params[0]
-            )
+            block_desired_x_center = x_min + (x_max - x_min) * self._current_params[0]
             # y is confined to inside the shelf height (no collision)
-            y_min = min(shelf_y + block_width / 2, shelf_y + shelf_height - block_width / 2)
-            y_max = max(shelf_y + block_width / 2, shelf_y + shelf_height - block_width / 2)
-            block_desired_y_center = (
-                y_min + (y_max - y_min) * self._current_params[1]
+            y_min = min(
+                shelf_y + block_width / 2, shelf_y + shelf_height - block_width / 2
             )
+            y_max = max(
+                shelf_y + block_width / 2, shelf_y + shelf_height - block_width / 2
+            )
+            block_desired_y_center = y_min + (y_max - y_min) * self._current_params[1]
             # Note: The desired orientation depends on how is the blocked grasped.
             # If grasping from the left side, the block should be placed with theta = np.pi / 2
             # If grasping from the right side, the block should be placed with theta = -np.pi / 2
@@ -362,12 +374,15 @@ def create_bilevel_planning_models(
                 block_desired_center = SE2Pose(
                     block_desired_x_center, block_desired_y_center, -np.pi / 2
                 )
-            gripper_final_desired_pose = block_desired_center * \
-                SE2Pose(-block_width / 2, -block_height / 2, 0.0) * \
-                gripper_to_block.inverse
+            gripper_final_desired_pose = (
+                block_desired_center
+                * SE2Pose(-block_width / 2, -block_height / 2, 0.0)
+                * gripper_to_block.inverse
+            )
 
-            final_robot_y = gripper_final_desired_pose.y - robot_arm_length \
-                - gripper_width
+            final_robot_y = (
+                gripper_final_desired_pose.y - robot_arm_length - gripper_width
+            )
 
             pre_place_robot_x = gripper_final_desired_pose.x
             pre_place_robot_y = final_robot_y - shelf_height
@@ -405,38 +420,156 @@ def create_bilevel_planning_models(
             if collision_free_waypoints_1 is None:
                 # Stay static
                 return [current_wp]
-            
+
             for wp in collision_free_waypoints_1:
                 final_waypoints.append((wp, robot_arm_length))
 
             return final_waypoints
 
+    class GroundPickBlockOnShelfController(GroundPickBlockNotOnShelfController):
+        """Controller for grasping the block that is not on the shelf yet.
+        The grasping point is either on the up or bottom side of the block.
+        """
+
+        def _calculate_grasp_robot_pose(self, state: ObjectCentricState) -> SE2Pose:
+            """Calculate the actual grasp point based on ratio parameter."""
+            if isinstance(self._current_params, tuple):
+                grasp_ratio, arm_length = self._current_params
+            else:
+                raise ValueError(
+                    "Expected tuple parameters for grasp ratio and arm length"
+                )
+
+            # Get block properties and grasp frame
+            block_x = state.get(self._block, "x")
+            block_y = state.get(self._block, "y")
+            block_theta = state.get(self._block, "theta")
+            rel_point_dy = state.get(self._block, "height") / 2
+            rel_point = SE2Pose(block_x, block_y, block_theta) * SE2Pose(
+                0.0, rel_point_dy, 0.0
+            )
+
+            # Relative SE2 pose w.r.t the grasp frame
+            custom_dy = (
+                state.get(self._block, "height") / 2
+                + arm_length
+                + state.get(self._robot, "gripper_width")
+            )
+            custom_dy *= -1 if grasp_ratio < 0 else 1  # top or bottom side grasp
+            # Custom dx is always positive.
+            custom_dx = abs(grasp_ratio) * state.get(self._block, "width")
+            custom_dtheta = np.pi / 2 if grasp_ratio < 0 else -np.pi / 2
+            custom_pose = SE2Pose(custom_dx, custom_dy, custom_dtheta)
+
+            target_se2_pose = rel_point * custom_pose
+            return target_se2_pose
+        
+    class GroundPlaceBlockNotOnShelfController(GroundPlaceBlockOnShelfController):
+        """Controller for placing the block not on the shelf."""
+
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> tuple[float, float, float]:
+            # Sample place ratio
+            # w.r.t (shelf_width - block_width)
+            # and (shelf_height - block_height)
+            full_state = x.copy()
+            init_constant_state = sim.initial_constant_state
+            if init_constant_state is not None:
+                full_state.data.update(init_constant_state.data)
+            while True:
+                abs_x = rng.uniform(world_x_min, world_x_max)
+                abs_y = rng.uniform(world_y_min, world_y_max)
+                abs_theta = rng.uniform(-np.pi, np.pi)
+                full_state.set(self._robot, "x", abs_x)
+                full_state.set(self._robot, "y", abs_y)
+                full_state.set(self._robot, "theta", abs_theta)
+                suctioned_objects = get_suctioned_objects(x, self._robot)
+                snap_suctioned_objects(full_state, self._robot, suctioned_objects)
+                # Check collision
+                moving_objects = {self._robot} | {o for o, _ in suctioned_objects}
+                static_objects = set(full_state) - moving_objects
+                if not state_has_collision(
+                    full_state, moving_objects, static_objects, {}
+                ):
+                    break
+            rel_x = (abs_x - world_x_min) / (world_x_max - world_x_min)
+            rel_y = (abs_y - world_y_min) / (world_y_max - world_y_min)
+            rel_theta = (abs_theta + np.pi) / (2 * np.pi)
+            
+            return (rel_x, rel_y, rel_theta)
+        
+        def _generate_waypoints(
+            self, state: ObjectCentricState
+        ) -> list[tuple[SE2Pose, float]]:
+            robot_x = state.get(self._robot, "x")
+            robot_y = state.get(self._robot, "y")
+            robot_theta = state.get(self._robot, "theta")
+            robot_radius = state.get(self._robot, "base_radius")
+            # Calculate place position
+            final_robot_x = (
+                world_x_min
+                + (world_x_max - world_x_min) * self._current_params[0]
+            )
+            final_robot_y = (
+                world_y_min
+                + (world_y_max - world_y_min) * self._current_params[1]
+            )
+            final_robot_theta = (
+                -np.pi
+                + (2 * np.pi) * self._current_params[2]
+            )
+            final_robot_pose = SE2Pose(
+                final_robot_x, final_robot_y, final_robot_theta
+            )
+
+            current_wp = (
+                SE2Pose(robot_x, robot_y, robot_theta),
+                robot_radius,
+            )
+            # Plan collision-free waypoints to the target pose
+            # We set the arm to be the longest during motion planning
+            final_waypoints: list[tuple[SE2Pose, float]] = [current_wp]
+            mp_state = state.copy()
+            mp_state.set(self._robot, "arm_joint", robot_radius)
+            assert isinstance(action_space, CRVRobotActionSpace)
+            collision_free_waypoints_0 = run_motion_planning_for_crv_robot(
+                mp_state, self._robot, final_robot_pose, action_space
+            )
+            if collision_free_waypoints_0 is None:
+                # Stay static
+                return final_waypoints
+            for wp in collision_free_waypoints_0:
+                final_waypoints.append((wp, robot_radius))
+
+            return final_waypoints
+        
     # Lifted controllers.
     PickBlockNotOnShelfController: LiftedParameterizedController = (
         LiftedParameterizedController(
             [robot, block, shelf],
-            GroundPickBlockController,
+            GroundPickBlockNotOnShelfController,
         )
     )
 
     PickBlockOnShelfController: LiftedParameterizedController = (
         LiftedParameterizedController(
             [robot, block, shelf],
-            GroundPickBlockController,
+            GroundPickBlockOnShelfController,
         )
     )
 
     PlaceBlockNotOnShelfController: LiftedParameterizedController = (
         LiftedParameterizedController(
             [robot, block, shelf],
-            GroundPlaceBlockController,
+            GroundPlaceBlockNotOnShelfController,
         )
     )
 
     PlaceBlockOnShelfController: LiftedParameterizedController = (
         LiftedParameterizedController(
             [robot, block, shelf],
-            GroundPlaceBlockController,
+            GroundPlaceBlockOnShelfController,
         )
     )
 
