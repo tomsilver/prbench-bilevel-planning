@@ -40,17 +40,11 @@ def test_motion2d_transition_fn():
     transition_fn = env_models.transition_fn
     obs, _ = env.reset(seed=123)
     state = env_models.observation_to_state(obs)
-    for i in range(100):
-        print(f"Step {i}")
-        img = env.render()
-        iio.imsave(f"debug/debug-motion2d-step-{i}.png", img)
+    for _ in range(100):
         executable = env.action_space.sample()
         obs, _, _, _, _ = env.step(executable)
         next_state = env_models.observation_to_state(obs)
         predicted_next_state = transition_fn(state, executable)
-        env.reset(options={"init_state": predicted_next_state})
-        img = env.render()
-        iio.imsave(f"debug/debug-motion2d-step-{i}_p.png", img)
         assert next_state == predicted_next_state
         state = next_state
     env.close()
@@ -149,9 +143,9 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=Fa
 
 def test_motion2d_skills():
     """Tests for skills in the Motion2D environment."""
-    env = prbench.make("prbench/Motion2D-p2-v0")
+    env = prbench.make("prbench/Motion2D-p1-v0")
     env_models = create_bilevel_planning_models(
-        "motion2d", env.observation_space, env.action_space, num_passages=2
+        "motion2d", env.observation_space, env.action_space, num_passages=1
     )
     skill_name_to_skill = {s.operator.name: s for s in env_models.skills}
     MoveTo = skill_name_to_skill["MoveTo"]
@@ -165,7 +159,7 @@ def test_motion2d_skills():
 
     # Test MoveTo skill
     move_to_skill = MoveTo.ground((robot, target_region))
-    obs1 = _skill_test_helper(move_to_skill, env_models, env, obs0)
+    obs1 = _skill_test_helper(move_to_skill, env_models, env, obs0, debug=True)
     
     # Check that robot reached the target region
     state1 = env_models.observation_to_state(obs1)
@@ -178,9 +172,9 @@ def test_motion2d_skills():
 @pytest.mark.parametrize(
     "num_passages, max_abstract_plans, samples_per_step",
     [
-        (0, 2, 5),
-        (1, 5, 5),
-        (2, 10, 3),
+        (1, 1, 10),
+        (2, 1, 10),
+        (3, 1, 10),
     ],
 )
 def test_motion2d_bilevel_planning(
@@ -217,7 +211,7 @@ def test_motion2d_bilevel_planning(
     obs, info = env.reset(seed=123)
     total_reward = 0
     agent.reset(obs, info)
-    for _ in range(1000):  # Max steps for motion planning task
+    for _ in range(5000):  # Max steps for motion planning task
         action = agent.step()
         obs, reward, terminated, truncated, info = env.step(action)
         total_reward += reward

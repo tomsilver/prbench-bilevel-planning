@@ -15,6 +15,7 @@ from geom2drobotenvs.structs import SE2Pose
 from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     rectangle_object_to_geom,
+    state_has_collision,
     run_motion_planning_for_crv_robot,
 )
 from gymnasium.spaces import Space
@@ -136,19 +137,34 @@ def create_bilevel_planning_models(
             target_y = x.get(self._target, "y")
             target_width = x.get(self._target, "width")
             target_height = x.get(self._target, "height")
+            full_state = x.copy()
+            init_constant_state = sim.initial_constant_state
+            if init_constant_state is not None:
+                full_state.data.update(init_constant_state.data)
+            while True:
+                # Sample relative position within the target region
+                rel_x = rng.uniform(0.1, 0.9)
+                rel_y = rng.uniform(0.1, 0.9)
+                # Sample random orientation
+                abs_theta = rng.uniform(-np.pi, np.pi)
+
+                # Convert to absolute coordinates within target bounds
+                abs_x = target_x + rel_x * target_width
+                abs_y = target_y + rel_y * target_height
+                full_state.set(self._robot, "x", abs_x)
+                full_state.set(self._robot, "y", abs_y)
+                full_state.set(self._robot, "theta", abs_theta)
+                # Check collision
+                moving_objects = {self._robot}
+                static_objects = set(full_state) - moving_objects
+                if not state_has_collision(
+                    full_state, moving_objects, static_objects, {}
+                ):
+                    break
+            # Relative orientation
+            rel_theta = (abs_theta + np.pi) / (2 * np.pi)
             
-            # Sample relative position within the target region
-            rel_x = rng.uniform(0.1, 0.9)
-            rel_y = rng.uniform(0.1, 0.9)
-            
-            # Convert to absolute coordinates within target bounds
-            abs_x = target_x + rel_x * target_width
-            abs_y = target_y + rel_y * target_height
-            
-            # Sample random orientation
-            abs_theta = rng.uniform(-np.pi, np.pi)
-            
-            return (rel_x, rel_y, abs_theta)
+            return (rel_x, rel_y, rel_theta)
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 0.0, 0.0  # No vacuum needed for motion
@@ -170,7 +186,8 @@ def create_bilevel_planning_models(
             
             final_x = target_x + params[0] * target_width
             final_y = target_y + params[1] * target_height
-            final_theta = params[2]
+            # Convert to absolute angle
+            final_theta = params[2] * 2 * np.pi - np.pi 
             final_pose = SE2Pose(final_x, final_y, final_theta)
 
             current_wp = (
@@ -181,7 +198,9 @@ def create_bilevel_planning_models(
             # Use motion planning to find collision-free path
             assert isinstance(action_space, CRVRobotActionSpace)
             collision_free_waypoints = run_motion_planning_for_crv_robot(
-                state, self._robot, final_pose, action_space
+                state, self._robot, final_pose, action_space,
+                num_iters=100,
+                num_attempts=20
             )
             
             final_waypoints: list[tuple[SE2Pose, float]] = []
