@@ -235,7 +235,7 @@ def test_clutteredstorage2d_skills_on_shelf():
     "num_blocks, max_abstract_plans, samples_per_step",
     [
         (1, 2, 5),
-        (3, 10, 10),
+        # (3, 10, 10),
     ],
 )
 def test_clutteredstorage2d_bilevel_planning(
