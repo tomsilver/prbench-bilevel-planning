@@ -35,7 +35,9 @@ from relational_structs import (
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
 from tomsgeoms2d.structs import Geom2D
 
-from prbench_bilevel_planning.env_models import Geom2dRobotController
+from prbench_bilevel_planning.env_models.geom2d.geom2d_utils import (
+    Geom2dRobotController,
+)
 
 
 def create_bilevel_planning_models(

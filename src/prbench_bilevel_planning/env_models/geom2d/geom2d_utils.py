@@ -1,17 +1,13 @@
-"""Dynamically load bilevel planning env models."""
+"""Utilities for 2D geometry robot manipulation tasks."""
 
 import abc
-import importlib.util
-import sys
-from pathlib import Path
-from typing import Sequence
+from typing import Sequence, Union
 
 import numpy as np
-from bilevel_planning.structs import GroundParameterizedController, SesameModels
+from bilevel_planning.structs import GroundParameterizedController
 from geom2drobotenvs.object_types import CRVRobotType
 from geom2drobotenvs.structs import SE2Pose
 from geom2drobotenvs.utils import CRVRobotActionSpace
-from gymnasium.spaces import Space
 from numpy.typing import NDArray
 from relational_structs import Object, ObjectCentricState
 
@@ -28,9 +24,9 @@ class Geom2dRobotController(GroundParameterizedController, abc.ABC):
         self._robot = objects[0]
         assert self._robot.is_instance(CRVRobotType)
         super().__init__(objects)
-        self._current_params: tuple[float, ...] | float = 0.0
-        self._current_plan: list[NDArray[np.float32]] | None = None
-        self._current_state: ObjectCentricState | None = None
+        self._current_params: Union[tuple[float, ...], float] = 0.0
+        self._current_plan: Union[list[NDArray[np.float32]], None] = None
+        self._current_state: Union[ObjectCentricState, None] = None
         self._safe_y = safe_y
         # Extract max deltas from action space bounds
         self._max_delta_x = action_space.high[0]
@@ -90,7 +86,9 @@ class Geom2dRobotController(GroundParameterizedController, abc.ABC):
 
         return plan
 
-    def reset(self, x: ObjectCentricState, params: tuple[float, ...] | float) -> None:
+    def reset(
+        self, x: ObjectCentricState, params: Union[tuple[float, ...], float]
+    ) -> None:
         self._current_params = params
         self._current_plan = None
         self._current_state = x
@@ -116,35 +114,3 @@ class Geom2dRobotController(GroundParameterizedController, abc.ABC):
             np.array([0, 0, 0, 0, vacuum_after_plan], dtype=np.float32),
         ]
         return waypoint_plan + plan_suffix
-
-
-__all__ = ["create_bilevel_planning_models"]
-
-
-def create_bilevel_planning_models(
-    env_name: str, observation_space: Space, executable_space: Space, **kwargs
-) -> SesameModels:
-    """Load bilevel planning models for the given environment."""
-    current_file = Path(__file__).resolve()
-    env_path = current_file.parent / "geom2d" / f"{env_name}.py"
-
-    if not env_path.exists():
-        raise FileNotFoundError(f"No model file found for environment: {env_path}")
-
-    module_name = f"{env_name}_module"
-    spec = importlib.util.spec_from_file_location(module_name, env_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load spec for {env_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-
-    if not hasattr(module, "create_bilevel_planning_models"):
-        raise AttributeError(
-            f"{env_path} does not define `create_bilevel_planning_models`"
-        )
-
-    return module.create_bilevel_planning_models(
-        observation_space, executable_space, **kwargs
-    )
