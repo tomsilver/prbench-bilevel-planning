@@ -73,15 +73,19 @@ def create_bilevel_planning_models(
     state_space = ObjectCentricStateSpace(types)
 
     # Predicates.
-    At = Predicate("At", [CRVRobotType, TargetRegionType])
-    NotAt = Predicate("NotAt", [CRVRobotType, TargetRegionType])
-    predicates = {At, NotAt}
+    AtTgt = Predicate("AtTgt", [CRVRobotType, TargetRegionType])
+    NotAtTgt = Predicate("NotAtTgt", [CRVRobotType, TargetRegionType])
+    AtPassage = Predicate("AtPassage", [CRVRobotType, RectangleType, RectangleType])
+    NotAtPassage = Predicate("NotAtPassage", [CRVRobotType, RectangleType, RectangleType])
+    NotAtAnyPassage = Predicate("NotAtAnyPassage", [CRVRobotType])
+    predicates = {AtTgt, NotAtTgt, AtPassage, NotAtPassage, NotAtAnyPassage}
 
     # State abstractor.
     def state_abstractor(x: ObjectCentricState) -> RelationalAbstractState:
         """Get the abstract state for the current state."""
         robot = x.get_objects(CRVRobotType)[0]
         target_region = x.get_objects(TargetRegionType)[0]
+        obstacles = x.get_objects(RectangleType)
 
         atoms: set[GroundAtom] = set()
         
@@ -91,11 +95,42 @@ def create_bilevel_planning_models(
         target_region_geom = rectangle_object_to_geom(x, target_region, {})
         
         if target_region_geom.contains_point(robot_x, robot_y):
-            atoms.add(GroundAtom(At, [robot, target_region]))
+            atoms.add(GroundAtom(AtTgt, [robot, target_region]))
         else:
-            atoms.add(GroundAtom(NotAt, [robot, target_region]))
+            atoms.add(GroundAtom(NotAtTgt, [robot, target_region]))
+
+        robot_x = x.get(robot, "x")
+        robot_radius = x.get(robot, "base_radius")
+        robot_y = x.get(robot, "y")
+        at_any_passage = False
+        for obs1 in obstacles:
+            for obs2 in obstacles:
+                if obs1 != obs2:
+                    obs1_x = x.get(obs1, "x")
+                    obs2_x = x.get(obs2, "x")
+                    if obs1_x == obs2_x:
+                        obs_width = x.get(obs1, "width")
+                        obs1_y = x.get(obs1, "y")
+                        obs2_y = x.get(obs2, "y")
+                        obs2_height = x.get(obs2, "height")
+                        if obs1_y < obs2_y:
+                            # Obstacle1 should be higher than obstacle2
+                            continue
+                        y_min = obs2_y + obs2_height
+                        y_max = obs1_y
+                        assert y_min <= y_max, "Obstacles should not overlap vertically"
+                        x_close = abs(obs1_x + obs_width / 2 - robot_x) \
+                            < robot_radius
+                        y_close = (y_min <= robot_y <= y_max)
+                        if x_close and y_close:
+                            at_any_passage = True
+                            atoms.add(GroundAtom(AtPassage, [robot, obs1, obs2]))
+                        else:
+                            atoms.add(GroundAtom(NotAtPassage, [robot, obs1, obs2]))
+        if not at_any_passage:
+            atoms.add(GroundAtom(NotAtAnyPassage, [robot]))   
             
-        objects = {robot, target_region}
+        objects = {robot, target_region} | set(obstacles)
         return RelationalAbstractState(atoms, objects)
 
     # Goal abstractor.
@@ -103,25 +138,68 @@ def create_bilevel_planning_models(
         """The goal is to have the robot at the target region."""
         robot = x.get_objects(CRVRobotType)[0]
         target_region = x.get_objects(TargetRegionType)[0]
-        atoms = {GroundAtom(At, [robot, target_region])}
+        atoms = {GroundAtom(AtTgt, [robot, target_region])}
         return RelationalAbstractGoal(atoms, state_abstractor)
 
     # Operators.
     robot = Variable("?robot", CRVRobotType)
     target = Variable("?target", TargetRegionType)
+    obstacle1 = Variable("?obstacle1", RectangleType)
+    obstacle2 = Variable("?obstacle2", RectangleType)
+    obstacle3 = Variable("?obstacle3", RectangleType)
+    obstacle4 = Variable("?obstacle4", RectangleType)
 
-    MoveToOperator = LiftedOperator(
-        "MoveTo",
+    MoveToTgtFromNoPassageOperator = LiftedOperator(
+        "MoveToTgtFromNoPassage",
         [robot, target],
         preconditions={
-            LiftedAtom(NotAt, [robot, target]),
+            LiftedAtom(NotAtTgt, [robot, target]),
+            LiftedAtom(NotAtAnyPassage, [robot]),
         },
-        add_effects={LiftedAtom(At, [robot, target])},
-        delete_effects={LiftedAtom(NotAt, [robot, target])},
+        add_effects={LiftedAtom(AtTgt, [robot, target])},
+        delete_effects={LiftedAtom(NotAtTgt, [robot, target])},
+    )
+
+    MoveToTgtFromPassageOperator = LiftedOperator(
+        "MoveToTgtFromPassage",
+        [robot, target, obstacle1, obstacle2],
+        preconditions={
+            LiftedAtom(NotAtTgt, [robot, target]),
+            LiftedAtom(AtPassage, [robot, obstacle1, obstacle2]),
+        },
+        add_effects={LiftedAtom(AtTgt, [robot, target]),
+                    LiftedAtom(NotAtAnyPassage, [robot]),
+                    LiftedAtom(NotAtPassage, [robot, obstacle1, obstacle2])},
+        delete_effects={LiftedAtom(NotAtTgt, [robot, target]),
+                        LiftedAtom(AtPassage, [robot, obstacle1, obstacle2])},
+    )
+
+    MoveToPassageFromNoPassageOperator = LiftedOperator(
+        "MoveToPassageFromNoPassage",
+        [robot, obstacle1, obstacle2],
+        preconditions={
+            LiftedAtom(NotAtAnyPassage, [robot]),
+            LiftedAtom(NotAtPassage, [robot, obstacle1, obstacle2]),
+        },
+        add_effects={LiftedAtom(AtPassage, [robot, obstacle1, obstacle2])},
+        delete_effects={LiftedAtom(NotAtPassage, [robot, obstacle1, obstacle2]),
+                        LiftedAtom(NotAtAnyPassage, [robot])},
+    )
+
+    MoveToPassageFromPassageOperator = LiftedOperator(
+        "MoveToPassageFromPassage",
+        [robot, obstacle1, obstacle2, obstacle3, obstacle4],
+        preconditions={
+            LiftedAtom(AtPassage, [robot, obstacle1, obstacle2]),
+            LiftedAtom(NotAtPassage, [robot, obstacle3, obstacle4]),
+        },
+        add_effects={LiftedAtom(AtPassage, [robot, obstacle3, obstacle4])},
+        delete_effects={LiftedAtom(NotAtPassage, [robot, obstacle3, obstacle4]),
+                        LiftedAtom(AtPassage, [robot, obstacle1, obstacle2])},
     )
 
     # Controllers.
-    class GroundMoveToController(Geom2dRobotController):
+    class GroundMoveToTgtController(Geom2dRobotController):
         """Controller for moving the robot to the target region."""
 
         def __init__(self, objects: Sequence[Object]) -> None:
@@ -198,10 +276,7 @@ def create_bilevel_planning_models(
             # Use motion planning to find collision-free path
             assert isinstance(action_space, CRVRobotActionSpace)
             collision_free_waypoints = run_motion_planning_for_crv_robot(
-                state, self._robot, final_pose, action_space,
-                num_iters=100,
-                num_attempts=20
-            )
+                state, self._robot, final_pose, action_space)
             
             final_waypoints: list[tuple[SE2Pose, float]] = []
             
@@ -214,15 +289,114 @@ def create_bilevel_planning_models(
 
             return final_waypoints
 
+    class GroundMoveToPassageController(GroundMoveToTgtController):
+        """Controller for moving the robot to a passage."""
+
+        def __init__(self, objects: Sequence[Object]) -> None:
+            assert isinstance(action_space, CRVRobotActionSpace)
+            super().__init__(objects)
+            self._obstacle1 = objects[1]
+            self._obstacle2 = objects[2]
+
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> tuple[float, float]:
+            # Sample a point between the two obstacles
+            obstacle1_x = x.get(self._obstacle1, "x")
+            obstacle2_x = x.get(self._obstacle2, "x")
+            obstacle1_y = x.get(self._obstacle1, "y")
+            obstacle2_y = x.get(self._obstacle2, "y")
+            full_state = x.copy()
+            init_constant_state = sim.initial_constant_state
+            if init_constant_state is not None:
+                full_state.data.update(init_constant_state.data)
+            while True:
+                rel_x = rng.uniform(0.1, 0.9)
+                rel_y = rng.uniform(0.1, 0.9)
+
+                abs_x = obstacle1_x + rel_x * (obstacle2_x - obstacle1_x)
+                abs_y = obstacle1_y + rel_y * (obstacle2_y - obstacle1_y)
+
+                full_state.set(self._robot, "x", abs_x)
+                full_state.set(self._robot, "y", abs_y)
+
+                # Check collision
+                moving_objects = {self._robot}
+                static_objects = set(full_state) - moving_objects
+                if not state_has_collision(
+                    full_state, moving_objects, static_objects, {}
+                ):
+                    break
+
+            return (rel_x, rel_y)
+
+        def _generate_waypoints(
+            self, state: ObjectCentricState
+        ) -> list[tuple[SE2Pose, float]]:
+            robot_x = state.get(self._robot, "x")
+            robot_y = state.get(self._robot, "y")
+            robot_theta = state.get(self._robot, "theta")
+            robot_radius = state.get(self._robot, "base_radius")
+            
+            # Calculate target position from parameters
+            params = cast(tuple[float, float, float], self._current_params)
+            target_x = state.get(self._target, "x")
+            target_y = state.get(self._target, "y")
+            target_width = state.get(self._target, "width")
+            target_height = state.get(self._target, "height")
+            
+            final_x = target_x + params[0] * target_width
+            final_y = target_y + params[1] * target_height
+            # Convert to absolute angle
+            final_theta = params[2] * 2 * np.pi - np.pi 
+            final_pose = SE2Pose(final_x, final_y, final_theta)
+
+            current_wp = (
+                SE2Pose(robot_x, robot_y, robot_theta),
+                robot_radius,
+            )
+
+            # Use motion planning to find collision-free path
+            assert isinstance(action_space, CRVRobotActionSpace)
+            collision_free_waypoints = run_motion_planning_for_crv_robot(
+                state, self._robot, final_pose, action_space)
+            
+            final_waypoints: list[tuple[SE2Pose, float]] = []
+            
+            if collision_free_waypoints is not None:
+                for wp in collision_free_waypoints:
+                    final_waypoints.append((wp, robot_radius))
+            else:
+                # If motion planning fails, stay in place
+                final_waypoints.append(current_wp)
+
+            return final_waypoints
+
+
     # Lifted controllers.
-    MoveToController: LiftedParameterizedController = LiftedParameterizedController(
+    MoveToTgtFromNoPassageController: LiftedParameterizedController = LiftedParameterizedController(
         [robot, target],
-        GroundMoveToController,
+        GroundMoveToTgtController,
+    )
+    MoveToTgtFromPassageController: LiftedParameterizedController = LiftedParameterizedController(
+        [robot, target, obstacle1, obstacle2],
+        GroundMoveToTgtController,
+    )
+    MoveToPassageFromNoPassageController: LiftedParameterizedController = LiftedParameterizedController(
+        [robot, obstacle1, obstacle2],
+        GroundMoveToPassageController,
+    )
+    MoveToPassageFromPassageController: LiftedParameterizedController = LiftedParameterizedController(
+        [robot, obstacle1, obstacle2, obstacle3, obstacle4],
+        GroundMoveToPassageController,
     )
 
     # Finalize the skills.
     skills = {
-        LiftedSkill(MoveToOperator, MoveToController),
+        LiftedSkill(MoveToTgtFromNoPassageOperator, MoveToTgtFromNoPassageController),
+        LiftedSkill(MoveToTgtFromPassageOperator, MoveToTgtFromPassageController),
+        LiftedSkill(MoveToPassageFromNoPassageOperator, MoveToPassageFromNoPassageController),
+        LiftedSkill(MoveToPassageFromPassageOperator, MoveToPassageFromPassageController),
     }
 
     # Finalize the models.

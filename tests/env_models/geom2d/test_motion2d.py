@@ -73,8 +73,12 @@ def test_motion2d_state_abstractor():
     )
     state_abstractor = env_models.state_abstractor
     pred_name_to_pred = {p.name: p for p in env_models.predicates}
-    At = pred_name_to_pred["At"]
-    NotAt = pred_name_to_pred["NotAt"]
+    AtTgt = pred_name_to_pred["AtTgt"]
+    NotAtTgt = pred_name_to_pred["NotAtTgt"]
+    AtPassage = pred_name_to_pred["AtPassage"]
+    NotAtPassage = pred_name_to_pred["NotAtPassage"]
+    NotAtAnyPassage = pred_name_to_pred["NotAtAnyPassage"]
+
 
     obs, _ = env.reset(seed=123)
     state = env_models.observation_to_state(obs)
@@ -82,10 +86,18 @@ def test_motion2d_state_abstractor():
     obj_name_to_obj = {o.name: o for o in abstract_state.objects}
     robot = obj_name_to_obj["robot"]
     target_region = obj_name_to_obj["target_region"]
+    obstacles = [o for o in abstract_state.objects if o.name.startswith("obstacle")]
+    assert len(obstacles) == 4, "Expected 4 obstacles in the environment"
+    obstacle1 = obstacles[0]
+    obstacle2 = obstacles[1]
+    obstacle3 = obstacles[2]
 
     # Initially robot should not be at target
-    assert NotAt([robot, target_region]) in abstract_state.atoms
-    assert At([robot, target_region]) not in abstract_state.atoms
+    assert NotAtTgt([robot, target_region]) in abstract_state.atoms
+    assert AtTgt([robot, target_region]) not in abstract_state.atoms
+    assert NotAtAnyPassage([robot]) in abstract_state.atoms
+    assert NotAtPassage([robot, obstacle1, obstacle2]) in abstract_state.atoms
+    assert NotAtPassage([robot, obstacle1, obstacle3]) not in abstract_state.atoms
 
     # Create state where robot is in the target region
     state1 = state.copy()
@@ -101,18 +113,25 @@ def test_motion2d_state_abstractor():
     state1.set(robot, "y", robot_y)
 
     abstract_state1 = state_abstractor(state1)
-    assert At([robot, target_region]) in abstract_state1.atoms
-    assert NotAt([robot, target_region]) not in abstract_state1.atoms
+    assert AtTgt([robot, target_region]) in abstract_state1.atoms
+    assert NotAtTgt([robot, target_region]) not in abstract_state1.atoms
 
-    # Create state where robot is outside target region
+    # Create state where robot is at a passage
     state2 = state.copy()
+    obstacle1_x = state2.get(obstacle1, "x")
+    obstacle1_y = state2.get(obstacle1, "y")
+    obstacle1_width = state2.get(obstacle1, "width")
+    obstacle2_x = state2.get(obstacle2, "x")
+    obstacle2_y = state2.get(obstacle2, "y") + state2.get(obstacle2, "height")
+    assert obstacle1_x == obstacle2_x, "Obstacles should be aligned"
     # Position robot far from target
-    state2.set(robot, "x", 0.1)
-    state2.set(robot, "y", 0.1)
+    state2.set(robot, "x", obstacle1_x + obstacle1_width / 2)
+    state2.set(robot, "y", (obstacle1_y + obstacle2_y) / 2)
 
     abstract_state2 = state_abstractor(state2)
-    assert NotAt([robot, target_region]) in abstract_state2.atoms
-    assert At([robot, target_region]) not in abstract_state2.atoms
+    assert AtPassage([robot, obstacle1, obstacle2]) in abstract_state2.atoms
+    assert NotAtPassage([robot, obstacle1, obstacle2]) not in abstract_state2.atoms
+    assert NotAtAnyPassage([robot]) not in abstract_state2.atoms
 
 
 def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=False):
