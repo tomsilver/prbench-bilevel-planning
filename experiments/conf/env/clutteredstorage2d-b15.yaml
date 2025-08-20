@@ -3,8 +3,8 @@ env_name: "clutteredstorage2d"
 
 # Passed into prbench.make() to create the environment.
 make_kwargs:
-  id: "prbench/ClutteredStorage2D-b1-v0"
+  id: "prbench/ClutteredStorage2D-b15-v0"
 
 # Passed into create_bilevel_planning_models() to create the env models.
 env_model_kwargs:
-  num_blocks: 1
+  num_blocks: 15

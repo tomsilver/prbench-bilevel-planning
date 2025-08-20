@@ -133,7 +133,7 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=Fa
     if params is None:
         params = controller.sample_parameters(state, rng)
     controller.reset(state, params)
-    for i in range(200):
+    for _ in range(200):
         action = controller.step()
         obs, _, _, _, _ = env.step(action)
         next_state = env_models.observation_to_state(obs)

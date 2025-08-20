@@ -1,6 +1,6 @@
 """Bilevel planning models for the cluttered storage 2D environment."""
 
-from typing import Sequence
+from typing import Any, Sequence, cast
 
 import numpy as np
 from bilevel_planning.structs import (
@@ -306,7 +306,7 @@ def create_bilevel_planning_models(
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
-        ) -> tuple[float, float]:
+        ) -> Any:
             # Sample place ratio
             # w.r.t (shelf_width - block_width)
             # and (shelf_height - block_height)
@@ -361,8 +361,10 @@ def create_bilevel_planning_models(
             )
             block_desired_y_center = y_min + (y_max - y_min) * self._current_params[1]
             # Note: The desired orientation depends on how is the blocked grasped.
-            # If grasping from the left side, the block should be placed with theta = np.pi / 2
-            # If grasping from the right side, the block should be placed with theta = -np.pi / 2
+            # If grasping from the left side, the block should be placed with
+            # theta = np.pi / 2
+            # If grasping from the right side, the block should be placed with
+            # theta = -np.pi / 2
             gripper_x, gripper_y = get_tool_tip_position(state, self._robot)
             gripper_frame = SE2Pose(gripper_x, gripper_y, block_theta)
             relative_frame = block_curr_center.inverse * gripper_frame
@@ -409,7 +411,9 @@ def create_bilevel_planning_models(
                 final_waypoints.append((wp, robot_radius))
 
             # Stretch the arm to the desired position
-            final_waypoints.append((wp, robot_arm_length))
+            if collision_free_waypoints_0:
+                last_wp = collision_free_waypoints_0[-1]
+                final_waypoints.append((last_wp, robot_arm_length))
 
             mp_state.set(self._robot, "x", pre_place_robot_x)
             mp_state.set(self._robot, "y", pre_place_robot_y)
@@ -472,7 +476,7 @@ def create_bilevel_planning_models(
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
-        ) -> tuple[float, float, float]:
+        ) -> Any:
             # Sample place ratio
             # w.r.t (shelf_width - block_width)
             # and (shelf_height - block_height)
@@ -510,13 +514,10 @@ def create_bilevel_planning_models(
             robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
             # Calculate place position
-            final_robot_x = (
-                world_x_min + (world_x_max - world_x_min) * self._current_params[0]
-            )
-            final_robot_y = (
-                world_y_min + (world_y_max - world_y_min) * self._current_params[1]
-            )
-            final_robot_theta = -np.pi + (2 * np.pi) * self._current_params[2]
+            params = cast(tuple[float, ...], self._current_params)
+            final_robot_x = world_x_min + (world_x_max - world_x_min) * params[0]
+            final_robot_y = world_y_min + (world_y_max - world_y_min) * params[1]
+            final_robot_theta = -np.pi + (2 * np.pi) * params[2]
             final_robot_pose = SE2Pose(final_robot_x, final_robot_y, final_robot_theta)
 
             current_wp = (
