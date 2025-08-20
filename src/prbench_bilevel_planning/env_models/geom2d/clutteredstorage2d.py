@@ -19,15 +19,15 @@ from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
     get_tool_tip_position,
-    snap_suctioned_objects,
     run_motion_planning_for_crv_robot,
-    state_has_collision
+    snap_suctioned_objects,
+    state_has_collision,
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
 from prbench.envs.geom2d.clutteredstorage2d import (
-    ObjectCentricClutteredStorage2DEnv,
     ClutteredStorage2DEnvSpec,
+    ObjectCentricClutteredStorage2DEnv,
     ShelfType,
     TargetBlockType,
 )
@@ -59,8 +59,9 @@ def create_bilevel_planning_models(
     world_x_min = env_spec.world_min_x + env_spec.robot_base_radius
     world_x_max = env_spec.world_max_x - env_spec.robot_base_radius
     world_y_min = env_spec.world_min_y + env_spec.robot_base_radius
-    world_y_max = env_spec.world_max_y - env_spec.shelf_height \
-        - env_spec.robot_base_radius
+    world_y_max = (
+        env_spec.world_max_y - env_spec.shelf_height - env_spec.robot_base_radius
+    )
 
     # Convert observations into states. The important thing is that states are hashable.
     def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
@@ -188,6 +189,7 @@ def create_bilevel_planning_models(
     # Controllers.
     class GroundPickBlockNotOnShelfController(Geom2dRobotController):
         """Controller for grasping the block that is not on the shelf yet.
+
         The grasping point is either on the left or right side of the block.
         """
 
@@ -428,6 +430,7 @@ def create_bilevel_planning_models(
 
     class GroundPickBlockOnShelfController(GroundPickBlockNotOnShelfController):
         """Controller for grasping the block that is not on the shelf yet.
+
         The grasping point is either on the up or bottom side of the block.
         """
 
@@ -463,7 +466,7 @@ def create_bilevel_planning_models(
 
             target_se2_pose = rel_point * custom_pose
             return target_se2_pose
-        
+
     class GroundPlaceBlockNotOnShelfController(GroundPlaceBlockOnShelfController):
         """Controller for placing the block not on the shelf."""
 
@@ -496,9 +499,9 @@ def create_bilevel_planning_models(
             rel_x = (abs_x - world_x_min) / (world_x_max - world_x_min)
             rel_y = (abs_y - world_y_min) / (world_y_max - world_y_min)
             rel_theta = (abs_theta + np.pi) / (2 * np.pi)
-            
+
             return (rel_x, rel_y, rel_theta)
-        
+
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[SE2Pose, float]]:
@@ -508,20 +511,13 @@ def create_bilevel_planning_models(
             robot_radius = state.get(self._robot, "base_radius")
             # Calculate place position
             final_robot_x = (
-                world_x_min
-                + (world_x_max - world_x_min) * self._current_params[0]
+                world_x_min + (world_x_max - world_x_min) * self._current_params[0]
             )
             final_robot_y = (
-                world_y_min
-                + (world_y_max - world_y_min) * self._current_params[1]
+                world_y_min + (world_y_max - world_y_min) * self._current_params[1]
             )
-            final_robot_theta = (
-                -np.pi
-                + (2 * np.pi) * self._current_params[2]
-            )
-            final_robot_pose = SE2Pose(
-                final_robot_x, final_robot_y, final_robot_theta
-            )
+            final_robot_theta = -np.pi + (2 * np.pi) * self._current_params[2]
+            final_robot_pose = SE2Pose(final_robot_x, final_robot_y, final_robot_theta)
 
             current_wp = (
                 SE2Pose(robot_x, robot_y, robot_theta),
@@ -543,7 +539,7 @@ def create_bilevel_planning_models(
                 final_waypoints.append((wp, robot_radius))
 
             return final_waypoints
-        
+
     # Lifted controllers.
     PickBlockNotOnShelfController: LiftedParameterizedController = (
         LiftedParameterizedController(

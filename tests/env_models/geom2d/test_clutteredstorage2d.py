@@ -1,12 +1,13 @@
 """Tests for clutteredstorage2d.py."""
 
 import time
-import pytest
-from conftest import MAKE_VIDEOS
-from gymnasium.wrappers import RecordVideo
+
 import imageio.v2 as iio
 import numpy as np
 import prbench
+import pytest
+from conftest import MAKE_VIDEOS
+from gymnasium.wrappers import RecordVideo
 
 from prbench_bilevel_planning.agent import BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
@@ -176,8 +177,6 @@ def test_clutteredstorage2d_skills_not_on_shelf():
     obs1 = _skill_test_helper(pick_block_not_on_shelf_skill, env_models, env, obs0)
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
-    img = env.render()
-    iio.imsave(f"debug/0.png", img)
     assert pred_name_to_pred["Holding"]([robot, block0]) in abstract_state1.atoms
 
     # Then place the block on shelf
@@ -211,16 +210,14 @@ def test_clutteredstorage2d_skills_on_shelf():
     shelf = obj_name_to_obj["shelf"]
     OnShelf = pred_name_to_pred["OnShelf"]
     assert OnShelf([block0, shelf]) in abstract_state.atoms
-    pick_block_on_shelf_skill = pick_block_on_shelf.ground(
-        (robot, block0, shelf)
-    )
+    pick_block_on_shelf_skill = pick_block_on_shelf.ground((robot, block0, shelf))
 
     # First pick the block
-    obs1 = _skill_test_helper(pick_block_on_shelf_skill, env_models, env, obs0, params=(-0.5, 0.4))
+    obs1 = _skill_test_helper(
+        pick_block_on_shelf_skill, env_models, env, obs0, params=(-0.5, 0.4)
+    )
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
-    img = env.render()
-    iio.imsave(f"debug/1.png", img)
     assert pred_name_to_pred["Holding"]([robot, block0]) in abstract_state1.atoms
 
     # Then place the block not on shelf
@@ -232,6 +229,7 @@ def test_clutteredstorage2d_skills_on_shelf():
     assert pred_name_to_pred["Holding"]([robot, block0]) not in abstract_state1.atoms
     assert pred_name_to_pred["NotOnShelf"]([block0, shelf]) in abstract_state1.atoms
     env.close()
+
 
 @pytest.mark.parametrize(
     "num_blocks, max_abstract_plans, samples_per_step",
