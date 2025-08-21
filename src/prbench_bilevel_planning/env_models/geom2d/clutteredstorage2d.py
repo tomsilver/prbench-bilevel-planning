@@ -10,6 +10,9 @@ from bilevel_planning.structs import (
     RelationalAbstractState,
     SesameModels,
 )
+from bilevel_planning.trajectory_samplers.trajectory_sampler import (
+    TrajectorySamplingFailure,
+)
 from geom2drobotenvs.concepts import is_inside_shelf
 from geom2drobotenvs.object_types import CRVRobotType
 from geom2drobotenvs.structs import (
@@ -257,9 +260,6 @@ def create_bilevel_planning_models(
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[SE2Pose, float]]:
-            robot_x = state.get(self._robot, "x")
-            robot_y = state.get(self._robot, "y")
-            robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
 
             # Calculate grasp point and robot target position
@@ -275,25 +275,24 @@ def create_bilevel_planning_models(
             # We set the arm to be the shortest length during motion planning
             mp_state = state.copy()
             mp_state.set(self._robot, "arm_joint", robot_radius)
+            init_constant_state = sim.initial_constant_state
+            if init_constant_state is not None:
+                mp_state.data.update(init_constant_state.data)
             assert isinstance(action_space, CRVRobotActionSpace)
             collision_free_waypoints = run_motion_planning_for_crv_robot(
                 mp_state, self._robot, target_se2_pose, action_space
             )
             final_waypoints: list[tuple[SE2Pose, float]] = []
-            current_wp = (
-                SE2Pose(robot_x, robot_y, robot_theta),
-                state.get(self._robot, "arm_joint"),
-            )
 
             if collision_free_waypoints is not None:
                 for wp in collision_free_waypoints:
                     final_waypoints.append((wp, robot_radius))
                 final_waypoints.append((target_se2_pose, desired_arm_length))
-            else:
-                # Stay static
-                final_waypoints.append(current_wp)
-
-            return final_waypoints
+                return final_waypoints
+            # If motion planning fails, raise failure
+            raise TrajectorySamplingFailure(
+                "Failed to find a collision-free path to target."
+            )
 
     class GroundPlaceBlockOnShelfController(Geom2dRobotController):
         """Controller for placing the block on the shelf."""
@@ -400,6 +399,9 @@ def create_bilevel_planning_models(
             # We set the arm to be the longest during motion planning
             final_waypoints: list[tuple[SE2Pose, float]] = []
             mp_state = state.copy()
+            init_constant_state = sim.initial_constant_state
+            if init_constant_state is not None:
+                mp_state.data.update(init_constant_state.data)
             assert isinstance(action_space, CRVRobotActionSpace)
             collision_free_waypoints_0 = run_motion_planning_for_crv_robot(
                 mp_state, self._robot, pre_place_pose_0, action_space
@@ -419,6 +421,8 @@ def create_bilevel_planning_models(
             mp_state.set(self._robot, "y", pre_place_robot_y)
             mp_state.set(self._robot, "theta", np.pi / 2)
             mp_state.set(self._robot, "arm_joint", robot_arm_length)
+            if init_constant_state is not None:
+                mp_state.data.update(init_constant_state.data)
             pre_place_pose_1 = SE2Pose(pre_place_robot_x, final_robot_y, np.pi / 2)
             collision_free_waypoints_1 = run_motion_planning_for_crv_robot(
                 mp_state, self._robot, pre_place_pose_1, action_space
@@ -529,6 +533,9 @@ def create_bilevel_planning_models(
             final_waypoints: list[tuple[SE2Pose, float]] = [current_wp]
             mp_state = state.copy()
             mp_state.set(self._robot, "arm_joint", robot_radius)
+            init_constant_state = sim.initial_constant_state
+            if init_constant_state is not None:
+                mp_state.data.update(init_constant_state.data)
             assert isinstance(action_space, CRVRobotActionSpace)
             collision_free_waypoints_0 = run_motion_planning_for_crv_robot(
                 mp_state, self._robot, final_robot_pose, action_space
