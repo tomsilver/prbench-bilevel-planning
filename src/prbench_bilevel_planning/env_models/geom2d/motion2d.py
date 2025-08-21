@@ -1,6 +1,6 @@
 """Bilevel planning models for the motion 2D environment."""
 
-from typing import Any, Sequence, cast
+from typing import Sequence, cast
 
 import numpy as np
 from bilevel_planning.structs import (
@@ -310,7 +310,7 @@ def create_bilevel_planning_models(
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
-        ) -> tuple[float, float]:
+        ) -> tuple[float, float, float]:
             # Sample a point between the two obstacles
             obstacle1_x = x.get(self._obstacle1, "x")
             obstacle1_width = x.get(self._obstacle1, "width")

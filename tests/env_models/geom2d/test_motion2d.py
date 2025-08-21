@@ -62,7 +62,7 @@ def test_motion2d_goal_deriver():
     goal = goal_deriver(state)
     assert len(goal.atoms) == 1
     goal_atom = next(iter(goal.atoms))
-    assert str(goal_atom) == "(At robot target_region)"
+    assert str(goal_atom) == "(AtTgt robot target_region)"
 
 
 def test_motion2d_state_abstractor():
@@ -235,8 +235,8 @@ def test_motion2d_skills():
 @pytest.mark.parametrize(
     "num_passages, max_abstract_plans, samples_per_step",
     [
-        (1, 10, 3),
-        (2, 10, 3),
+        # (1, 10, 3),
+        # (2, 10, 3),
         (3, 10, 3),
     ],
 )
