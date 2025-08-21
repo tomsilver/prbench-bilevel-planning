@@ -304,8 +304,11 @@ def create_bilevel_planning_models(
             # Sample a point between the two obstacles
             obstacle1_x = x.get(self._obstacle1, "x")
             obstacle2_x = x.get(self._obstacle2, "x")
+            obstacle1_width = x.get(self._obstacle1, "width")
             obstacle1_y = x.get(self._obstacle1, "y")
             obstacle2_y = x.get(self._obstacle2, "y")
+            obstacle2_height = x.get(self._obstacle2, "height")
+            robot_radius = x.get(self._robot, "base_radius")
             full_state = x.copy()
             init_constant_state = sim.initial_constant_state
             if init_constant_state is not None:
@@ -314,7 +317,9 @@ def create_bilevel_planning_models(
                 rel_x = rng.uniform(0.1, 0.9)
                 rel_y = rng.uniform(0.1, 0.9)
 
-                abs_x = obstacle1_x + rel_x * (obstacle2_x - obstacle1_x)
+                abs_x = obstacle1_x + obstacle1_width / 2 - robot_radius + \
+                    2 * robot_radius * rel_x
+                rel_x * (obstacle2_x - obstacle1_x)
                 abs_y = obstacle1_y + rel_y * (obstacle2_y - obstacle1_y)
 
                 full_state.set(self._robot, "x", abs_x)

@@ -86,18 +86,16 @@ def test_motion2d_state_abstractor():
     obj_name_to_obj = {o.name: o for o in abstract_state.objects}
     robot = obj_name_to_obj["robot"]
     target_region = obj_name_to_obj["target_region"]
-    obstacles = [o for o in abstract_state.objects if o.name.startswith("obstacle")]
-    assert len(obstacles) == 4, "Expected 4 obstacles in the environment"
-    obstacle1 = obstacles[0]
-    obstacle2 = obstacles[1]
-    obstacle3 = obstacles[2]
+    obstacle0 = obj_name_to_obj["obstacle0"]
+    obstacle1 = obj_name_to_obj["obstacle1"]
+    obstacle2 = obj_name_to_obj["obstacle2"]
 
     # Initially robot should not be at target
     assert NotAtTgt([robot, target_region]) in abstract_state.atoms
     assert AtTgt([robot, target_region]) not in abstract_state.atoms
     assert NotAtAnyPassage([robot]) in abstract_state.atoms
-    assert NotAtPassage([robot, obstacle1, obstacle2]) in abstract_state.atoms
-    assert NotAtPassage([robot, obstacle1, obstacle3]) not in abstract_state.atoms
+    assert NotAtPassage([robot, obstacle1, obstacle0]) in abstract_state.atoms
+    assert NotAtPassage([robot, obstacle1, obstacle2]) not in abstract_state.atoms
 
     # Create state where robot is in the target region
     state1 = state.copy()
@@ -118,19 +116,19 @@ def test_motion2d_state_abstractor():
 
     # Create state where robot is at a passage
     state2 = state.copy()
+    obstacle0_x = state2.get(obstacle0, "x")
+    obstacle0_y = state2.get(obstacle0, "y") + state2.get(obstacle0, "height")
+    obstacle0_width = state2.get(obstacle0, "width")
     obstacle1_x = state2.get(obstacle1, "x")
     obstacle1_y = state2.get(obstacle1, "y")
-    obstacle1_width = state2.get(obstacle1, "width")
-    obstacle2_x = state2.get(obstacle2, "x")
-    obstacle2_y = state2.get(obstacle2, "y") + state2.get(obstacle2, "height")
-    assert obstacle1_x == obstacle2_x, "Obstacles should be aligned"
+    assert obstacle0_x == obstacle1_x, "Obstacles should be aligned"
     # Position robot far from target
-    state2.set(robot, "x", obstacle1_x + obstacle1_width / 2)
-    state2.set(robot, "y", (obstacle1_y + obstacle2_y) / 2)
+    state2.set(robot, "x", obstacle0_x + obstacle0_width / 2)
+    state2.set(robot, "y", (obstacle0_y + obstacle1_y) / 2)
 
     abstract_state2 = state_abstractor(state2)
-    assert AtPassage([robot, obstacle1, obstacle2]) in abstract_state2.atoms
-    assert NotAtPassage([robot, obstacle1, obstacle2]) not in abstract_state2.atoms
+    assert AtPassage([robot, obstacle1, obstacle0]) in abstract_state2.atoms
+    assert NotAtPassage([robot, obstacle1, obstacle0]) not in abstract_state2.atoms
     assert NotAtAnyPassage([robot]) not in abstract_state2.atoms
 
 
@@ -162,12 +160,15 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=Fa
 
 def test_motion2d_skills():
     """Tests for skills in the Motion2D environment."""
-    env = prbench.make("prbench/Motion2D-p1-v0")
+    env = prbench.make("prbench/Motion2D-p2-v0")
     env_models = create_bilevel_planning_models(
         "motion2d", env.observation_space, env.action_space, num_passages=1
     )
     skill_name_to_skill = {s.operator.name: s for s in env_models.skills}
-    MoveTo = skill_name_to_skill["MoveTo"]
+    MoveToTgtFromPassage = skill_name_to_skill["MoveToTgtFromPassage"]
+    MoveToTgtFromNoPassage = skill_name_to_skill["MoveToTgtFromNoPassage"]
+    MoveToPassageFromNoPassage = skill_name_to_skill["MoveToPassageFromNoPassage"]
+    MoveToPassageFromPassage = skill_name_to_skill["MoveToPassageFromPassage"]
 
     obs0, _ = env.reset(seed=123)
     state0 = env_models.observation_to_state(obs0)
@@ -175,17 +176,21 @@ def test_motion2d_skills():
     obj_name_to_obj = {o.name: o for o in abstract_state.objects}
     robot = obj_name_to_obj["robot"]
     target_region = obj_name_to_obj["target_region"]
+    obstacle0 = obj_name_to_obj["obstacle0"]
+    obstacle1 = obj_name_to_obj["obstacle1"]
+    obstacle2 = obj_name_to_obj["obstacle2"]
+    obstacle3 = obj_name_to_obj["obstacle3"]
 
-    # Test MoveTo skill
-    move_to_skill = MoveTo.ground((robot, target_region))
+    # Test MoveToPassageFromNoPassage skill
+    move_to_skill = MoveToPassageFromNoPassage.ground((robot, obstacle1, obstacle0))
     obs1 = _skill_test_helper(move_to_skill, env_models, env, obs0, debug=True)
     
     # Check that robot reached the target region
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
     pred_name_to_pred = {p.name: p for p in env_models.predicates}
-    At = pred_name_to_pred["At"]
-    assert At([robot, target_region]) in abstract_state1.atoms
+    AtPassage = pred_name_to_pred["AtPassage"]
+    assert AtPassage([robot, obstacle1, obstacle0]) in abstract_state1.atoms
 
 
 @pytest.mark.parametrize(
