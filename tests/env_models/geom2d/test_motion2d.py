@@ -79,7 +79,6 @@ def test_motion2d_state_abstractor():
     NotAtPassage = pred_name_to_pred["NotAtPassage"]
     NotAtAnyPassage = pred_name_to_pred["NotAtAnyPassage"]
 
-
     obs, _ = env.reset(seed=123)
     state = env_models.observation_to_state(obs)
     abstract_state = state_abstractor(state)
@@ -103,7 +102,7 @@ def test_motion2d_state_abstractor():
     target_y = state1.get(target_region, "y")
     target_width = state1.get(target_region, "width")
     target_height = state1.get(target_region, "height")
-    
+
     # Position robot in the center of target region
     robot_x = target_x + target_width / 2
     robot_y = target_y + target_height / 2
@@ -183,8 +182,8 @@ def test_motion2d_skills():
 
     # Test MoveToPassageFromNoPassage skill
     move_to_skill = MoveToPassageFromNoPassage.ground((robot, obstacle1, obstacle0))
-    obs1 = _skill_test_helper(move_to_skill, env_models, env, obs0, debug=True)
-    
+    obs1 = _skill_test_helper(move_to_skill, env_models, env, obs0)
+
     # Check that robot reached the target region
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
@@ -192,27 +191,63 @@ def test_motion2d_skills():
     AtPassage = pred_name_to_pred["AtPassage"]
     assert AtPassage([robot, obstacle1, obstacle0]) in abstract_state1.atoms
 
+    # Test MoveToPassageFromPassage skill
+    move_to_skill = MoveToPassageFromPassage.ground(
+        (robot, obstacle3, obstacle2, obstacle1, obstacle0)
+    )
+    obs2 = _skill_test_helper(move_to_skill, env_models, env, obs1)
+    # Check that robot reached the target region
+    state2 = env_models.observation_to_state(obs2)
+    abstract_state2 = env_models.state_abstractor(state2)
+    assert AtPassage([robot, obstacle3, obstacle2]) in abstract_state2.atoms
+    assert AtPassage([robot, obstacle1, obstacle0]) not in abstract_state2.atoms
+
+    #  Test MoveToTgtFromPassage skill
+    move_to_skill = MoveToTgtFromPassage.ground(
+        (robot, target_region, obstacle3, obstacle2)
+    )
+    obs3 = _skill_test_helper(move_to_skill, env_models, env, obs2)
+    # Check that robot reached the target region
+    state3 = env_models.observation_to_state(obs3)
+    abstract_state3 = env_models.state_abstractor(state3)
+    AtTgt = pred_name_to_pred["AtTgt"]
+    NotAtAnyPassage = pred_name_to_pred["NotAtAnyPassage"]
+    assert AtTgt([robot, target_region]) in abstract_state3.atoms
+    assert NotAtAnyPassage([robot]) in abstract_state3.atoms
+
+    # Test MoveToTgtFromNoPassage skill
+    # We need to reset the robot so that motion planning can work
+    reset_state = state3.copy()
+    reset_state.set(robot, "y", 1.0)
+    obs4_, _ = env.reset(options={"init_state": reset_state})
+    abstract_reset_state = env_models.state_abstractor(reset_state)
+    NotAtTgt = pred_name_to_pred["NotAtTgt"]
+    assert NotAtTgt([robot, target_region]) in abstract_reset_state.atoms
+    assert NotAtAnyPassage([robot]) in abstract_reset_state.atoms
+    move_to_skill = MoveToTgtFromNoPassage.ground((robot, target_region))
+    obs4 = _skill_test_helper(move_to_skill, env_models, env, obs4_)
+    # Check that robot reached the target region
+    state4 = env_models.observation_to_state(obs4)
+    abstract_state4 = env_models.state_abstractor(state4)
+    assert AtTgt([robot, target_region]) in abstract_state4.atoms
+
 
 @pytest.mark.parametrize(
     "num_passages, max_abstract_plans, samples_per_step",
     [
-        (1, 1, 10),
-        (2, 1, 10),
-        (3, 1, 10),
+        (1, 10, 3),
+        (2, 10, 3),
+        (3, 10, 3),
     ],
 )
-def test_motion2d_bilevel_planning(
-    num_passages, max_abstract_plans, samples_per_step
-):
+def test_motion2d_bilevel_planning(num_passages, max_abstract_plans, samples_per_step):
     """Tests for bilevel planning in the Motion2D environment.
 
     Note that we only test a small number of passages to keep tests fast. Use experiment
     scripts to evaluate at scale.
     """
 
-    env = prbench.make(
-        f"prbench/Motion2D-p{num_passages}-v0", render_mode="rgb_array"
-    )
+    env = prbench.make(f"prbench/Motion2D-p{num_passages}-v0", render_mode="rgb_array")
 
     if MAKE_VIDEOS:
         env = RecordVideo(
