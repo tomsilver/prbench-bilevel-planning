@@ -243,7 +243,7 @@ def test_clutteredstorage2d_bilevel_planning(
 ):
     """Tests for bilevel planning in the ClutteredStorage2D environment.
 
-    Note that we only test a small number of buttons to keep tests fast. Use experiment
+    Note that we only test a small number of blocks to keep tests fast. Use experiment
     scripts to evaluate at scale.
     """
 
