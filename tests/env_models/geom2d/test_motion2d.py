@@ -235,9 +235,9 @@ def test_motion2d_skills():
 @pytest.mark.parametrize(
     "num_passages, max_abstract_plans, samples_per_step",
     [
-        # (1, 10, 3),
+        # (1, 5, 3),
         # (2, 10, 3),
-        (3, 10, 3),
+        (3, 2, 3),
     ],
 )
 def test_motion2d_bilevel_planning(num_passages, max_abstract_plans, samples_per_step):
