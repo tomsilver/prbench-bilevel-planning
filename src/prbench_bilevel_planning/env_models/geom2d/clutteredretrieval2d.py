@@ -1,6 +1,6 @@
 """Bilevel planning models for the cluttered retrieval 2D environment."""
 
-from typing import Sequence
+from typing import Sequence, cast
 
 import numpy as np
 from bilevel_planning.structs import (
@@ -19,6 +19,7 @@ from geom2drobotenvs.utils import (
     CRVRobotActionSpace,
     get_suctioned_objects,
     run_motion_planning_for_crv_robot,
+    snap_suctioned_objects,
     state_has_collision,
 )
 from gymnasium.spaces import Space
@@ -53,6 +54,10 @@ def create_bilevel_planning_models(
 
     sim = ObjectCentricClutteredRetrieval2DEnv(num_obstructions=num_obstructions)
     env_spec = ClutteredRetrieval2DEnvSpec()
+    world_x_min = env_spec.world_min_x + env_spec.robot_base_radius
+    world_x_max = env_spec.world_max_x - env_spec.robot_base_radius
+    world_y_min = env_spec.world_min_y + env_spec.robot_base_radius
+    world_y_max = env_spec.world_max_y - env_spec.robot_base_radius
 
     # Convert observations into states. The important thing is that states are hashable.
     def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
@@ -77,28 +82,36 @@ def create_bilevel_planning_models(
     state_space = ObjectCentricStateSpace(types)
 
     # Predicates.
-    Holding = Predicate("Holding", [CRVRobotType, TargetBlockType])
+    HoldingTgt = Predicate("HoldingTgt", [CRVRobotType, TargetBlockType])
+    HoldingObstruction = Predicate("HoldingObstruction", [CRVRobotType, RectangleType])
     HandEmpty = Predicate("HandEmpty", [CRVRobotType])
-    predicates = {Holding, HandEmpty}
+    predicates = {HoldingTgt, HoldingObstruction, HandEmpty}
 
     # State abstractor.
     def state_abstractor(x: ObjectCentricState) -> RelationalAbstractState:
         """Get the abstract state for the current state."""
-        robot = Object("robot", CRVRobotType)
-        target_block = Object("target_block", TargetBlockType)
-        obstructions: set[Object] = set()
-        for i in range(num_obstructions):
-            obstruction = Object(f"obstruction{i}", RectangleType)
-            obstructions.add(obstruction)
+        robot = x.get_objects(CRVRobotType)[0]
+        target_block = x.get_objects(TargetBlockType)[0]
+        obstructions = x.get_objects(RectangleType)
         atoms: set[GroundAtom] = set()
         # Add holding / handempty atoms.
         suctioned_objs = {o for o, _ in get_suctioned_objects(x, robot)}
-        # Only target block can be held (goal is to retrieve it)
+        # Check what the robot is holding
         if target_block in suctioned_objs:
-            atoms.add(GroundAtom(Holding, [robot, target_block]))
+            atoms.add(GroundAtom(HoldingTgt, [robot, target_block]))
         else:
-            atoms.add(GroundAtom(HandEmpty, [robot]))
-        objects = {robot, target_block} | obstructions
+            # Check if holding any obstruction
+            held_obstruction = None
+            for obstruction in obstructions:
+                if obstruction in suctioned_objs:
+                    held_obstruction = obstruction
+                    break
+            
+            if held_obstruction is not None:
+                atoms.add(GroundAtom(HoldingObstruction, [robot, held_obstruction]))
+            else:
+                atoms.add(GroundAtom(HandEmpty, [robot]))
+        objects = {robot, target_block} | set(obstructions)
         return RelationalAbstractState(atoms, objects)
 
     # Goal abstractor.
@@ -107,32 +120,41 @@ def create_bilevel_planning_models(
         del x  # not needed
         robot = Object("robot", CRVRobotType)
         target_block = Object("target_block", TargetBlockType)
-        atoms = {GroundAtom(Holding, [robot, target_block])}
+        atoms = {GroundAtom(HoldingTgt, [robot, target_block])}
         return RelationalAbstractGoal(atoms, state_abstractor)
 
     # Operators.
     robot = Variable("?robot", CRVRobotType)
     target_block = Variable("?target_block", TargetBlockType)
+    obstruction = Variable("?obstruction", RectangleType)
 
-    PickOperator = LiftedOperator(
-        "Pick",
+    PickTgtOperator = LiftedOperator(
+        "PickTgt",
         [robot, target_block],
         preconditions={LiftedAtom(HandEmpty, [robot])},
-        add_effects={LiftedAtom(Holding, [robot, target_block])},
+        add_effects={LiftedAtom(HoldingTgt, [robot, target_block])},
+        delete_effects={LiftedAtom(HandEmpty, [robot])},
+    )
+
+    PickObstructionOperator = LiftedOperator(
+        "PickObstruction",
+        [robot, obstruction],
+        preconditions={LiftedAtom(HandEmpty, [robot])},
+        add_effects={LiftedAtom(HoldingObstruction, [robot, obstruction])},
         delete_effects={LiftedAtom(HandEmpty, [robot])},
     )
     
-    PlaceOperator = LiftedOperator(
-        "Place",
-        [robot, target_block],
-        preconditions={LiftedAtom(Holding, [robot, target_block])},
+    PlaceObstructionOperator = LiftedOperator(
+        "PlaceObstruction",
+        [robot, obstruction],
+        preconditions={LiftedAtom(HoldingObstruction, [robot, obstruction])},
         add_effects={LiftedAtom(HandEmpty, [robot])},
-        delete_effects={LiftedAtom(Holding, [robot, target_block])},
+        delete_effects={LiftedAtom(HoldingObstruction, [robot, obstruction])},
     )
 
     # Controllers.
     class GroundPickController(Geom2dRobotController):
-        """Controller for picking the target block.
+        """Controller for picking rectangular objects (target blocks or obstructions).
 
         The grasping point is sampled on all four sides of the block.
         """
@@ -140,90 +162,104 @@ def create_bilevel_planning_models(
         def __init__(self, objects: Sequence[Object]) -> None:
             assert isinstance(action_space, CRVRobotActionSpace)
             super().__init__(objects, action_space)
-            self._target_block = objects[1]
-            assert self._target_block.is_instance(TargetBlockType)
+            self._block = objects[1]
+            assert self._block.is_instance(TargetBlockType) \
+                or self._block.is_instance(RectangleType)
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
-        ) -> tuple[float, float]:
+        ) -> tuple[float, float, float]:
             # Sample grasp ratio and side
-            # grasp_ratio: determines position along the side ([-1.0, 1.0])
-            # side: 0=left, 1=right, 2=top, 3=bottom
-            grasp_ratio = rng.uniform(-1.0, 1.0)
-            side = rng.choice(4)
-            max_arm_length = x.get(self._robot, "arm_length")
-            min_arm_length = (
-                x.get(self._robot, "base_radius")
-                + x.get(self._robot, "gripper_width") / 2
-                + 1e-4
-            )
-            arm_length = rng.uniform(min_arm_length, max_arm_length)
+            # grasp_ratio: determines position along the side ([0.0, 1.0])
+            # side: 0~0.25 left, 0.25~0.5 right, 0.5~0.75 top, 0.75~1.0 bottom
+            full_state = x.copy()
+            init_constant_state = sim.initial_constant_state
+            if init_constant_state is not None:
+                full_state.data.update(init_constant_state.data)
+            while True:
+                grasp_ratio = rng.uniform(0.0, 1.0)
+                side = rng.uniform(0.0, 1.0)
+                max_arm_length = x.get(self._robot, "arm_length")
+                min_arm_length = (
+                    x.get(self._robot, "base_radius")
+                    + x.get(self._robot, "gripper_width") / 2
+                    + 1e-4
+                )
+                arm_length = rng.uniform(min_arm_length, max_arm_length)
+                # Calcuate Robot Pos
+                target_se2_pose = self._calculate_grasp_robot_pose(
+                    x, grasp_ratio, side, arm_length
+                )
+                # Check if the target pose is collision-free
+                full_state.set(self._robot, "x", target_se2_pose.x)
+                full_state.set(self._robot, "y", target_se2_pose.y)
+                full_state.set(self._robot, "theta", target_se2_pose.theta)
+                full_state.set(self._robot, "arm_joint", arm_length)
+                # Check collision
+                moving_objects = {self._robot}
+                static_objects = set(full_state) - moving_objects
+                if not state_has_collision(
+                    full_state, moving_objects, static_objects, {}
+                ):
+                    break
+
             # Pack parameters: side determines grasp approach, ratio determines position
-            return (side + grasp_ratio, arm_length)
+            return (grasp_ratio, side, arm_length)
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 0.0, 1.0
 
-        def _calculate_grasp_robot_pose(self, state: ObjectCentricState) -> SE2Pose:
+        def _calculate_grasp_robot_pose(self, state: ObjectCentricState,
+                                        ratio: float,
+                                        side: float,
+                                        arm_length: float
+                                        ) -> SE2Pose:
             """Calculate the grasp point based on side and ratio parameters."""
-            if isinstance(self._current_params, tuple):
-                side_ratio, arm_length = self._current_params
-                side = int(side_ratio)
-                ratio = side_ratio - side
-            else:
-                raise ValueError("Expected tuple parameters for side_ratio and arm_length")
-
             # Get block properties
-            block_x = state.get(self._target_block, "x")
-            block_y = state.get(self._target_block, "y")
-            block_theta = state.get(self._target_block, "theta")
-            block_width = state.get(self._target_block, "width")
-            block_height = state.get(self._target_block, "height")
+            block_x = state.get(self._block, "x")
+            block_y = state.get(self._block, "y")
+            block_theta = state.get(self._block, "theta")
+            block_width = state.get(self._block, "width")
+            block_height = state.get(self._block, "height")
 
             # Calculate reference point and approach direction based on side
-            if side == 0:  # left side
-                rel_point_dx = -block_width / 2
-                rel_point_dy = ratio * block_height / 2
+            if side < 0.25:  # left side
                 custom_dx = -(arm_length + state.get(self._robot, "gripper_width"))
-                custom_dy = 0.0
+                custom_dy = ratio * block_height
                 custom_dtheta = 0.0
-            elif side == 1:  # right side
-                rel_point_dx = block_width / 2
-                rel_point_dy = ratio * block_height / 2
-                custom_dx = arm_length + state.get(self._robot, "gripper_width")
-                custom_dy = 0.0
+            elif 0.25 <= side < 0.5:  # right side
+                custom_dx = arm_length + state.get(self._robot, "gripper_width") + \
+                    block_width
+                custom_dy = ratio * block_height
                 custom_dtheta = np.pi
-            elif side == 2:  # top side
-                rel_point_dx = ratio * block_width / 2
-                rel_point_dy = block_height / 2
-                custom_dx = 0.0
-                custom_dy = arm_length + state.get(self._robot, "gripper_width")
+            elif 0.5 <= side < 0.75:  # top side
+                custom_dx = ratio * block_width
+                custom_dy = arm_length + state.get(self._robot, "gripper_width") + \
+                    block_height
                 custom_dtheta = -np.pi / 2
-            else:  # bottom side (side == 3)
-                rel_point_dx = ratio * block_width / 2
-                rel_point_dy = -block_height / 2
-                custom_dx = 0.0
+            else:  # bottom side
+                custom_dx = ratio * block_width
                 custom_dy = -(arm_length + state.get(self._robot, "gripper_width"))
                 custom_dtheta = np.pi / 2
 
-            rel_point = SE2Pose(block_x, block_y, block_theta) * SE2Pose(
-                rel_point_dx, rel_point_dy, 0.0
+            target_se2_pose = SE2Pose(block_x, block_y, block_theta) * SE2Pose(
+                custom_dx, custom_dy, custom_dtheta
             )
-            custom_pose = SE2Pose(custom_dx, custom_dy, custom_dtheta)
-            target_se2_pose = rel_point * custom_pose
             return target_se2_pose
 
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[SE2Pose, float]]:
+            """Generate waypoints to the grasp point."""
+            grasp_ratio, side, desired_arm_length = self._current_params
+            robot_x = state.get(self._robot, "x")
+            robot_y = state.get(self._robot, "y")
+            robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
-
             # Calculate grasp point and robot target position
-            target_se2_pose = self._calculate_grasp_robot_pose(state)
-            if isinstance(self._current_params, tuple):
-                _, desired_arm_length = self._current_params
-            else:
-                raise ValueError("Expected tuple parameters")
+            target_se2_pose = self._calculate_grasp_robot_pose(state,
+                                                                grasp_ratio, side,
+                                                                desired_arm_length)
 
             # Plan collision-free waypoints to the target pose
             mp_state = state.copy()
@@ -235,7 +271,10 @@ def create_bilevel_planning_models(
             collision_free_waypoints = run_motion_planning_for_crv_robot(
                 mp_state, self._robot, target_se2_pose, action_space
             )
-            final_waypoints: list[tuple[SE2Pose, float]] = []
+            # Always first make arm shortest to avoid collisions
+            final_waypoints: list[tuple[SE2Pose, float]] = [
+                (SE2Pose(robot_x, robot_y, robot_theta), robot_radius)
+            ]
 
             if collision_free_waypoints is not None:
                 for wp in collision_free_waypoints:
@@ -248,13 +287,13 @@ def create_bilevel_planning_models(
             )
 
     class GroundPlaceController(Geom2dRobotController):
-        """Controller for placing the target block in a collision-free location."""
+        """Controller for placing rectangular objects (target blocks or obstructions) in a collision-free location."""
 
         def __init__(self, objects: Sequence[Object]) -> None:
             assert isinstance(action_space, CRVRobotActionSpace)
             super().__init__(objects, action_space)
-            self._target_block = objects[1]
-            assert self._target_block.is_instance(TargetBlockType)
+            self._block = objects[1]
+            assert self._block.is_instance(TargetBlockType) or self._block.is_instance(RectangleType)
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
@@ -264,40 +303,26 @@ def create_bilevel_planning_models(
             init_constant_state = sim.initial_constant_state
             if init_constant_state is not None:
                 full_state.data.update(init_constant_state.data)
-            
-            world_x_min = env_spec.world_min_x + env_spec.robot_base_radius
-            world_x_max = env_spec.world_max_x - env_spec.robot_base_radius
-            world_y_min = env_spec.world_min_y + env_spec.robot_base_radius
-            world_y_max = env_spec.world_max_y - env_spec.robot_base_radius
-            
-            max_attempts = 1000
-            for _ in range(max_attempts):
+            while True:
                 abs_x = rng.uniform(world_x_min, world_x_max)
                 abs_y = rng.uniform(world_y_min, world_y_max)
                 abs_theta = rng.uniform(-np.pi, np.pi)
-                
-                # Test this position
-                test_state = full_state.copy()
-                test_state.set(self._robot, "x", abs_x)
-                test_state.set(self._robot, "y", abs_y)
-                test_state.set(self._robot, "theta", abs_theta)
-                
+                full_state.set(self._robot, "x", abs_x)
+                full_state.set(self._robot, "y", abs_y)
+                full_state.set(self._robot, "theta", abs_theta)
+                suctioned_objects = get_suctioned_objects(x, self._robot)
+                snap_suctioned_objects(full_state, self._robot, suctioned_objects)
                 # Check collision
-                moving_objects = {self._robot, self._target_block}
-                static_objects = set(test_state) - moving_objects
-                if not state_has_collision(test_state, moving_objects, static_objects, {}):
+                moving_objects = {self._robot} | {o for o, _ in suctioned_objects}
+                static_objects = set(full_state) - moving_objects
+                if not state_has_collision(
+                    full_state, moving_objects, static_objects, {}
+                ):
                     break
-            else:
-                # Fallback to current position if no collision-free position found
-                abs_x = x.get(self._robot, "x")
-                abs_y = x.get(self._robot, "y")
-                abs_theta = x.get(self._robot, "theta")
-            
-            # Return normalized parameters
             rel_x = (abs_x - world_x_min) / (world_x_max - world_x_min)
             rel_y = (abs_y - world_y_min) / (world_y_max - world_y_min)
             rel_theta = (abs_theta + np.pi) / (2 * np.pi)
-            
+
             return (rel_x, rel_y, rel_theta)
 
         def _get_vacuum_actions(self) -> tuple[float, float]:
@@ -310,29 +335,19 @@ def create_bilevel_planning_models(
             robot_y = state.get(self._robot, "y")
             robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
-
-            # Calculate place position from normalized parameters
-            if isinstance(self._current_params, tuple):
-                rel_x, rel_y, rel_theta = self._current_params
-            else:
-                raise ValueError("Expected tuple parameters")
-
-            world_x_min = env_spec.world_min_x + env_spec.robot_base_radius
-            world_x_max = env_spec.world_max_x - env_spec.robot_base_radius
-            world_y_min = env_spec.world_min_y + env_spec.robot_base_radius
-            world_y_max = env_spec.world_max_y - env_spec.robot_base_radius
-
-            final_robot_x = world_x_min + (world_x_max - world_x_min) * rel_x
-            final_robot_y = world_y_min + (world_y_max - world_y_min) * rel_y
-            final_robot_theta = -np.pi + (2 * np.pi) * rel_theta
+            # Calculate place position
+            params = cast(tuple[float, ...], self._current_params)
+            final_robot_x = world_x_min + (world_x_max - world_x_min) * params[0]
+            final_robot_y = world_y_min + (world_y_max - world_y_min) * params[1]
+            final_robot_theta = -np.pi + (2 * np.pi) * params[2]
             final_robot_pose = SE2Pose(final_robot_x, final_robot_y, final_robot_theta)
 
             current_wp = (
                 SE2Pose(robot_x, robot_y, robot_theta),
                 robot_radius,
             )
-
             # Plan collision-free waypoints to the target pose
+            # We set the arm to be the longest during motion planning
             final_waypoints: list[tuple[SE2Pose, float]] = [current_wp]
             mp_state = state.copy()
             mp_state.set(self._robot, "arm_joint", robot_radius)
@@ -340,32 +355,38 @@ def create_bilevel_planning_models(
             if init_constant_state is not None:
                 mp_state.data.update(init_constant_state.data)
             assert isinstance(action_space, CRVRobotActionSpace)
-            collision_free_waypoints = run_motion_planning_for_crv_robot(
+            collision_free_waypoints_0 = run_motion_planning_for_crv_robot(
                 mp_state, self._robot, final_robot_pose, action_space
             )
-            if collision_free_waypoints is None:
-                # Stay static if no path found
+            if collision_free_waypoints_0 is None:
+                # Stay static
                 return final_waypoints
-            for wp in collision_free_waypoints:
+            for wp in collision_free_waypoints_0:
                 final_waypoints.append((wp, robot_radius))
 
             return final_waypoints
 
     # Lifted controllers.
-    PickController: LiftedParameterizedController = LiftedParameterizedController(
+    PickTgtController: LiftedParameterizedController = LiftedParameterizedController(
         [robot, target_block],
         GroundPickController,
     )
 
-    PlaceController: LiftedParameterizedController = LiftedParameterizedController(
-        [robot, target_block],
+    PickObstructionController: LiftedParameterizedController = LiftedParameterizedController(
+        [robot, obstruction],
+        GroundPickController,
+    )
+
+    PlaceObstructionController: LiftedParameterizedController = LiftedParameterizedController(
+        [robot, obstruction],
         GroundPlaceController,
     )
 
     # Finalize the skills.
     skills = {
-        LiftedSkill(PickOperator, PickController),
-        LiftedSkill(PlaceOperator, PlaceController),
+        LiftedSkill(PickTgtOperator, PickTgtController),
+        LiftedSkill(PickObstructionOperator, PickObstructionController),
+        LiftedSkill(PlaceObstructionOperator, PlaceObstructionController),
     }
 
     # Finalize the models.

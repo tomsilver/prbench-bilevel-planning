@@ -260,6 +260,9 @@ def create_bilevel_planning_models(
         def _generate_waypoints(
             self, state: ObjectCentricState
         ) -> list[tuple[SE2Pose, float]]:
+            robot_x = state.get(self._robot, "x")
+            robot_y = state.get(self._robot, "y")
+            robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
 
             # Calculate grasp point and robot target position
@@ -282,7 +285,10 @@ def create_bilevel_planning_models(
             collision_free_waypoints = run_motion_planning_for_crv_robot(
                 mp_state, self._robot, target_se2_pose, action_space
             )
-            final_waypoints: list[tuple[SE2Pose, float]] = []
+            # Always first make arm shortest to avoid collisions
+            final_waypoints: list[tuple[SE2Pose, float]] = [
+                (SE2Pose(robot_x, robot_y, robot_theta), robot_radius)
+            ]
 
             if collision_free_waypoints is not None:
                 for wp in collision_free_waypoints:
