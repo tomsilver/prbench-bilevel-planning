@@ -106,7 +106,7 @@ def create_bilevel_planning_models(
                 if obstruction in suctioned_objs:
                     held_obstruction = obstruction
                     break
-            
+
             if held_obstruction is not None:
                 atoms.add(GroundAtom(HoldingObstruction, [robot, held_obstruction]))
             else:
@@ -143,7 +143,7 @@ def create_bilevel_planning_models(
         add_effects={LiftedAtom(HoldingObstruction, [robot, obstruction])},
         delete_effects={LiftedAtom(HandEmpty, [robot])},
     )
-    
+
     PlaceObstructionOperator = LiftedOperator(
         "PlaceObstruction",
         [robot, obstruction],
@@ -163,8 +163,9 @@ def create_bilevel_planning_models(
             assert isinstance(action_space, CRVRobotActionSpace)
             super().__init__(objects, action_space)
             self._block = objects[1]
-            assert self._block.is_instance(TargetBlockType) \
-                or self._block.is_instance(RectangleType)
+            assert self._block.is_instance(TargetBlockType) or self._block.is_instance(
+                RectangleType
+            )
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
@@ -209,11 +210,13 @@ def create_bilevel_planning_models(
         def _get_vacuum_actions(self) -> tuple[float, float]:
             return 0.0, 1.0
 
-        def _calculate_grasp_robot_pose(self, state: ObjectCentricState,
-                                        ratio: float,
-                                        side: float,
-                                        arm_length: float
-                                        ) -> SE2Pose:
+        def _calculate_grasp_robot_pose(
+            self,
+            state: ObjectCentricState,
+            ratio: float,
+            side: float,
+            arm_length: float,
+        ) -> SE2Pose:
             """Calculate the grasp point based on side and ratio parameters."""
             # Get block properties
             block_x = state.get(self._block, "x")
@@ -228,14 +231,16 @@ def create_bilevel_planning_models(
                 custom_dy = ratio * block_height
                 custom_dtheta = 0.0
             elif 0.25 <= side < 0.5:  # right side
-                custom_dx = arm_length + state.get(self._robot, "gripper_width") + \
-                    block_width
+                custom_dx = (
+                    arm_length + state.get(self._robot, "gripper_width") + block_width
+                )
                 custom_dy = ratio * block_height
                 custom_dtheta = np.pi
             elif 0.5 <= side < 0.75:  # top side
                 custom_dx = ratio * block_width
-                custom_dy = arm_length + state.get(self._robot, "gripper_width") + \
-                    block_height
+                custom_dy = (
+                    arm_length + state.get(self._robot, "gripper_width") + block_height
+                )
                 custom_dtheta = -np.pi / 2
             else:  # bottom side
                 custom_dx = ratio * block_width
@@ -251,15 +256,18 @@ def create_bilevel_planning_models(
             self, state: ObjectCentricState
         ) -> list[tuple[SE2Pose, float]]:
             """Generate waypoints to the grasp point."""
-            grasp_ratio, side, desired_arm_length = self._current_params
+            params = cast(tuple[float, ...], self._current_params)
+            grasp_ratio = params[0]
+            side = params[1]
+            desired_arm_length = params[2]
             robot_x = state.get(self._robot, "x")
             robot_y = state.get(self._robot, "y")
             robot_theta = state.get(self._robot, "theta")
             robot_radius = state.get(self._robot, "base_radius")
             # Calculate grasp point and robot target position
-            target_se2_pose = self._calculate_grasp_robot_pose(state,
-                                                                grasp_ratio, side,
-                                                                desired_arm_length)
+            target_se2_pose = self._calculate_grasp_robot_pose(
+                state, grasp_ratio, side, desired_arm_length
+            )
 
             # Plan collision-free waypoints to the target pose
             mp_state = state.copy()
@@ -287,13 +295,16 @@ def create_bilevel_planning_models(
             )
 
     class GroundPlaceController(Geom2dRobotController):
-        """Controller for placing rectangular objects (target blocks or obstructions) in a collision-free location."""
+        """Controller for placing rectangular objects (target blocks or obstructions) in
+        a collision-free location."""
 
         def __init__(self, objects: Sequence[Object]) -> None:
             assert isinstance(action_space, CRVRobotActionSpace)
             super().__init__(objects, action_space)
             self._block = objects[1]
-            assert self._block.is_instance(TargetBlockType) or self._block.is_instance(RectangleType)
+            assert self._block.is_instance(TargetBlockType) or self._block.is_instance(
+                RectangleType
+            )
 
         def sample_parameters(
             self, x: ObjectCentricState, rng: np.random.Generator
@@ -360,7 +371,9 @@ def create_bilevel_planning_models(
             )
             if collision_free_waypoints_0 is None:
                 # Stay static
-                return final_waypoints
+                raise TrajectorySamplingFailure(
+                    "Failed to find a collision-free path to target."
+                )
             for wp in collision_free_waypoints_0:
                 final_waypoints.append((wp, robot_radius))
 
@@ -372,14 +385,18 @@ def create_bilevel_planning_models(
         GroundPickController,
     )
 
-    PickObstructionController: LiftedParameterizedController = LiftedParameterizedController(
-        [robot, obstruction],
-        GroundPickController,
+    PickObstructionController: LiftedParameterizedController = (
+        LiftedParameterizedController(
+            [robot, obstruction],
+            GroundPickController,
+        )
     )
 
-    PlaceObstructionController: LiftedParameterizedController = LiftedParameterizedController(
-        [robot, obstruction],
-        GroundPlaceController,
+    PlaceObstructionController: LiftedParameterizedController = (
+        LiftedParameterizedController(
+            [robot, obstruction],
+            GroundPlaceController,
+        )
     )
 
     # Finalize the skills.

@@ -1,6 +1,7 @@
 """Tests for clutteredretrieval2d.py."""
 
 import time
+
 import imageio.v2 as iio
 import numpy as np
 import prbench
@@ -18,7 +19,10 @@ def test_clutteredretrieval2d_observation_to_state():
     """Tests for observation_to_state() in the ClutteredRetrieval2D environment."""
     env = prbench.make("prbench/ClutteredRetrieval2D-o1-v0")
     env_models = create_bilevel_planning_models(
-        "clutteredretrieval2d", env.observation_space, env.action_space, num_obstructions=1
+        "clutteredretrieval2d",
+        env.observation_space,
+        env.action_space,
+        num_obstructions=1,
     )
     observation_to_state = env_models.observation_to_state
     obs, _ = env.reset(seed=123)
@@ -34,7 +38,10 @@ def test_clutteredretrieval2d_transition_fn():
     env = prbench.make("prbench/ClutteredRetrieval2D-o1-v0")
     env.action_space.seed(123)
     env_models = create_bilevel_planning_models(
-        "clutteredretrieval2d", env.observation_space, env.action_space, num_obstructions=1
+        "clutteredretrieval2d",
+        env.observation_space,
+        env.action_space,
+        num_obstructions=1,
     )
     transition_fn = env_models.transition_fn
     obs, _ = env.reset(seed=123)
@@ -53,7 +60,10 @@ def test_clutteredretrieval2d_goal_deriver():
     """Tests for goal_deriver() in the ClutteredRetrieval2D environment."""
     env = prbench.make("prbench/ClutteredRetrieval2D-o1-v0")
     env_models = create_bilevel_planning_models(
-        "clutteredretrieval2d", env.observation_space, env.action_space, num_obstructions=1
+        "clutteredretrieval2d",
+        env.observation_space,
+        env.action_space,
+        num_obstructions=1,
     )
     goal_deriver = env_models.goal_deriver
     obs, _ = env.reset(seed=123)
@@ -68,12 +78,14 @@ def test_clutteredretrieval2d_state_abstractor():
     """Tests for state_abstractor() in the ClutteredRetrieval2D environment."""
     env = prbench.make("prbench/ClutteredRetrieval2D-o1-v0")
     env_models = create_bilevel_planning_models(
-        "clutteredretrieval2d", env.observation_space, env.action_space, num_obstructions=1
+        "clutteredretrieval2d",
+        env.observation_space,
+        env.action_space,
+        num_obstructions=1,
     )
     state_abstractor = env_models.state_abstractor
     pred_name_to_pred = {p.name: p for p in env_models.predicates}
     HoldingTgt = pred_name_to_pred["HoldingTgt"]
-    HoldingObstruction = pred_name_to_pred["HoldingObstruction"]
     HandEmpty = pred_name_to_pred["HandEmpty"]
     env.reset(seed=123)
     obs, _, _, _, _ = env.step((0, 0, 0, 0.1, 0.0))  # extend the arm
@@ -127,7 +139,10 @@ def test_clutteredretrieval2d_skills():
     """Tests for skills in the ClutteredRetrieval2D environment."""
     env = prbench.make("prbench/ClutteredRetrieval2D-o1-v0")
     env_models = create_bilevel_planning_models(
-        "clutteredretrieval2d", env.observation_space, env.action_space, num_obstructions=1
+        "clutteredretrieval2d",
+        env.observation_space,
+        env.action_space,
+        num_obstructions=1,
     )
     predicate_name_to_pred = {p.name: p for p in env_models.predicates}
     skill_name_to_skill = {s.operator.name: s for s in env_models.skills}
@@ -141,41 +156,52 @@ def test_clutteredretrieval2d_skills():
     robot = obj_name_to_obj["robot"]
     target_block = obj_name_to_obj["target_block"]
     obstruction = obj_name_to_obj["obstruction0"]
-    pick_target_block = PickTgt.ground((robot, target_block)) 
+    pick_target_block = PickTgt.ground((robot, target_block))
     # Test picking the target block from left side.
-    obs1 = _skill_test_helper(pick_target_block, env_models, env, obs0, 
-                              params=(0.5, 0.1, 0.15))
+    obs1 = _skill_test_helper(
+        pick_target_block, env_models, env, obs0, params=(0.5, 0.1, 0.15)
+    )
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
-    assert (predicate_name_to_pred["HoldingTgt"]([robot, target_block]) in
-            abstract_state1.atoms)
+    assert (
+        predicate_name_to_pred["HoldingTgt"]([robot, target_block])
+        in abstract_state1.atoms
+    )
     # Test picking the obstruction from bottom side.
     obs0, _ = env.reset(seed=123)
     pick_obstruction = PickObstruction.ground((robot, obstruction))
-    obs1 = _skill_test_helper(pick_obstruction, env_models, env, obs0, 
-                              params=(0.5, 0.9, 0.15))
+    obs1 = _skill_test_helper(
+        pick_obstruction, env_models, env, obs0, params=(0.5, 0.9, 0.15)
+    )
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
-    assert (predicate_name_to_pred["HoldingObstruction"]([robot, obstruction]) in
-            abstract_state1.atoms)
-    
+    assert (
+        predicate_name_to_pred["HoldingObstruction"]([robot, obstruction])
+        in abstract_state1.atoms
+    )
+
     # Placing the obstruction to empty place.
     place_obstruction = PlaceObstruction.ground((robot, obstruction))
     obs1 = _skill_test_helper(place_obstruction, env_models, env, obs1)
     state1 = env_models.observation_to_state(obs1)
     abstract_state1 = env_models.state_abstractor(state1)
-    assert (predicate_name_to_pred["HandEmpty"]([robot]) in abstract_state1.atoms)
-    assert (predicate_name_to_pred["HoldingObstruction"]([robot, obstruction]) not in
-            abstract_state1.atoms)
-    
+    assert predicate_name_to_pred["HandEmpty"]([robot]) in abstract_state1.atoms
+    assert (
+        predicate_name_to_pred["HoldingObstruction"]([robot, obstruction])
+        not in abstract_state1.atoms
+    )
+
     # Picking the target block from right side, which should be possible now.
     pick_target_block = PickTgt.ground((robot, target_block))
-    obs2 = _skill_test_helper(pick_target_block, env_models, env, obs1, 
-                              params=(0.9, 0.4, 0.15))
+    obs2 = _skill_test_helper(
+        pick_target_block, env_models, env, obs1, params=(0.9, 0.4, 0.15)
+    )
     state2 = env_models.observation_to_state(obs2)
     abstract_state2 = env_models.state_abstractor(state2)
-    assert (predicate_name_to_pred["HoldingTgt"]([robot, target_block]) in
-            abstract_state2.atoms)
+    assert (
+        predicate_name_to_pred["HoldingTgt"]([robot, target_block])
+        in abstract_state2.atoms
+    )
 
 
 @pytest.mark.parametrize(
@@ -199,7 +225,9 @@ def test_clutteredretrieval2d_bilevel_planning(
 
     if MAKE_VIDEOS:
         env = RecordVideo(
-            env, "unit_test_videos", name_prefix=f"ClutteredRetrieval2D-o{num_obstructions}"
+            env,
+            "unit_test_videos",
+            name_prefix=f"ClutteredRetrieval2D-o{num_obstructions}",
         )
 
     env_models = create_bilevel_planning_models(
@@ -215,7 +243,7 @@ def test_clutteredretrieval2d_bilevel_planning(
         samples_per_step=samples_per_step,
     )
 
-    obs, info = env.reset(seed=123)
+    obs, info = env.reset(seed=1)
 
     total_reward = 0
     agent.reset(obs, info)
