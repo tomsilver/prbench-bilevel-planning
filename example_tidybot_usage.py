@@ -151,6 +151,7 @@ class TidybotBilevelDemo:
             objects=[self.robot, self.cube],
             max_skill_horizon=100,
             custom_grasp=False,
+            env=self.env,  # Pass the MuJoCo environment
         )
         
         # Reset controller with current state
@@ -161,7 +162,7 @@ class TidybotBilevelDemo:
         
         # Execute skill steps
         step_count = 0
-        while not pick_controller.terminated() and step_count < 50:
+        while not pick_controller.terminated() and step_count < 100:
             action = pick_controller.step()
             print(f"Step {step_count}: Generated action with base_pose={action['base_pose']}")
             
@@ -193,6 +194,7 @@ class TidybotBilevelDemo:
             target_x=target_x,
             target_y=target_y,
             max_skill_horizon=100,
+            env=self.env,  # Pass the MuJoCo environment
         )
         
         # Reset controller with current state
@@ -236,6 +238,7 @@ class TidybotBilevelDemo:
             target_y=target_y,
             max_skill_horizon=200,
             custom_grasp=False,
+            env=self.env,  # Pass the MuJoCo environment
         )
         
         # Reset controller with current state
@@ -377,10 +380,10 @@ class TidybotBilevelDemo:
         
         # Demonstrate individual skills
         self.demonstrate_pick_skill()
-        self.demonstrate_place_skill()
+        # self.demonstrate_place_skill()
         
-        # Demonstrate combined skill
-        self.demonstrate_pick_and_place_skill()
+        # # Demonstrate combined skill
+        # self.demonstrate_pick_and_place_skill()
         
         print("\n" + "=" * 60)
         print("Demonstration completed successfully!")

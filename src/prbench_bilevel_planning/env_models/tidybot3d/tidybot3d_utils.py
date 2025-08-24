@@ -35,6 +35,7 @@ class PickState(Enum):
     LOWER = "lower"
     GRASP = "grasp"
     LIFT = "lift"
+    RETURN_HOME = "return_home"
 
 
 class PlaceState(Enum):
@@ -55,7 +56,7 @@ class TidybotController(GroundParameterizedController):
     # Base following parameters
     LOOKAHEAD_DISTANCE = 0.3
     POSITION_TOLERANCE = 0.005
-    GRASP_BASE_TOLERANCE = 0.002
+    GRASP_BASE_TOLERANCE = 0.01  # Increased from 0.002 to 1.0 cm for more practical tolerance
     PLACE_BASE_TOLERANCE = 0.02
 
     # Object and target locations
@@ -82,11 +83,13 @@ class TidybotController(GroundParameterizedController):
         max_skill_horizon: int = 100,
         ee_offset: float = 0.12,
         custom_grasp: bool = False,
+        env: Optional[Any] = None,
     ) -> None:
         super().__init__(objects)
         self._robot = objects[0]  # Assume first object is the robot
         self._max_skill_horizon = max_skill_horizon
         self._custom_grasp = custom_grasp
+        self._env = env  # Store the MuJoCo environment
         
         # Motion planning state
         self.state: str = "idle"  # States: idle, moving, manipulating
@@ -192,37 +195,67 @@ class TidybotController(GroundParameterizedController):
             "gripper_pos": np.array([0.0]),  # Gripper open
         }
 
-    def detect_objects_from_state(self, state: ObjectCentricState) -> List[np.ndarray]:
-        """Detect objects from the relational state.
-        
-        This method extracts object positions from the ObjectCentricState
-        and returns them in the format expected by the tidybot policy.
-        """
+    def detect_objects_from_mujoco(self) -> List[np.ndarray]:
+        """Detect objects directly from the MuJoCo simulation."""
         detected_objects: List[np.ndarray] = []
         
-        # Find all cube objects in the state
-        cubes: List[Tuple[np.ndarray, str]] = []
-        for obj in state.data.keys():
-            if "cube" in obj.name.lower():
-                # Extract position from state
-                x = state.get(obj, "x")
-                y = state.get(obj, "y") 
-                z = state.get(obj, "z")  # Height must be present in state
-                
-                cube_pos = np.array([x, y, z])
-                cubes.append((cube_pos, obj.name))
+        if self._env is None:
+            print("Warning: No MuJoCo environment available, falling back to obs detection")
+            return detected_objects
         
+        try:
+            # Get the current observation from MuJoCo environment
+            obs = self._env.get_obs()
+            
+            cubes: List[Tuple[np.ndarray, str]] = []
+            for key in obs:
+                if key.endswith("_pos") and "cube" in key:
+                    cube_pos = obs[key].copy()  # Get the actual position from MuJoCo
+                    cube_name = key.replace("_pos", "")
+                    cubes.append((cube_pos, cube_name))
+                    print(f"Found cube '{cube_name}' at MuJoCo position: {cube_pos}")
+
+            if cubes:
+                if self._custom_grasp:
+                    cubes.sort(key=lambda x: x[0][1])  # Sort by y
+                else:
+                    cubes.sort(key=lambda x: x[0][0])  # Sort by x
+                target_cube_pos, target_cube_name = cubes[0]
+                print(
+                    f"Selected target object '{target_cube_name}' at MuJoCo pose: {target_cube_pos}"
+                )
+                detected_objects.append(target_cube_pos)
+        except Exception as e:
+            print(f"Error detecting objects from MuJoCo: {e}")
+        
+        return detected_objects
+
+    def detect_objects_from_obs(self, obs: Dict[str, Any]) -> List[np.ndarray]:
+        """Detect objects using observation from the simulation."""
+        # First try to get from MuJoCo environment directly
+        if self._env is not None:
+            return self.detect_objects_from_mujoco()
+        
+        # Fallback to observation dictionary
+        detected_objects: List[np.ndarray] = []
+        cubes: List[Tuple[np.ndarray, str]] = []
+        for key in obs:
+            if key.endswith("_pos") and "cube" in key:
+                cube_pos = obs[key]
+                cube_name = key.replace("_pos", "")
+                cubes.append((cube_pos, cube_name))
+
         if cubes:
-            # Sort cubes by x position and select the one with smallest x value
             if self._custom_grasp:
                 cubes.sort(key=lambda x: x[0][1])  # Sort by y
-                target_cube_pos, target_cube_name = cubes[0]
             else:
                 cubes.sort(key=lambda x: x[0][0])  # Sort by x
-                target_cube_pos, target_cube_name = cubes[0]
-            
+            target_cube_pos, target_cube_name = cubes[0]
+            print(
+                f"Selected target object '{target_cube_name}' at pose: {target_cube_pos}"
+            )
             detected_objects.append(target_cube_pos)
-        
+
         return detected_objects
 
     def distance(
