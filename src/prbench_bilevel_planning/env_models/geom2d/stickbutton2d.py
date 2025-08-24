@@ -10,18 +10,18 @@ from bilevel_planning.structs import (
     RelationalAbstractState,
     SesameModels,
 )
-from geom2drobotenvs.object_types import CircleType, CRVRobotType, RectangleType
-from geom2drobotenvs.structs import SE2Pose
-from geom2drobotenvs.utils import (
-    CRVRobotActionSpace,
-    get_suctioned_objects,
-    object_to_multibody2d,
-)
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
+from prbench.envs.geom2d.object_types import CircleType, CRVRobotType, RectangleType
 from prbench.envs.geom2d.stickbutton2d import (
     ObjectCentricStickButton2DEnv,
     StickButton2DEnvSpec,
+)
+from prbench.envs.geom2d.structs import SE2Pose
+from prbench.envs.geom2d.utils import (
+    CRVRobotActionSpace,
+    get_suctioned_objects,
+    object_to_multibody2d,
 )
 from relational_structs import (
     GroundAtom,

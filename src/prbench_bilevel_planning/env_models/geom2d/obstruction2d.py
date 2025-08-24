@@ -10,17 +10,20 @@ from bilevel_planning.structs import (
     RelationalAbstractState,
     SesameModels,
 )
-from geom2drobotenvs.concepts import is_on
-from geom2drobotenvs.envs.obstruction_2d_env import TargetBlockType, TargetSurfaceType
-from geom2drobotenvs.object_types import CRVRobotType, RectangleType
-from geom2drobotenvs.structs import SE2Pose
-from geom2drobotenvs.utils import (
-    CRVRobotActionSpace,
-    get_suctioned_objects,
-)
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
-from prbench.envs.geom2d.obstruction2d import G2DOE as ObjectCentricObstruction2DEnv
+from prbench.envs.geom2d.object_types import CRVRobotType, RectangleType
+from prbench.envs.geom2d.obstruction2d import (
+    ObjectCentricObstruction2DEnv,
+    TargetBlockType,
+    TargetSurfaceType,
+)
+from prbench.envs.geom2d.structs import SE2Pose
+from prbench.envs.geom2d.utils import (
+    CRVRobotActionSpace,
+    get_suctioned_objects,
+    is_on,
+)
 from relational_structs import (
     GroundAtom,
     LiftedAtom,
