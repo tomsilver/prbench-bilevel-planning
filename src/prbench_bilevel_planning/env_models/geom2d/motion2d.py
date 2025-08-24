@@ -13,20 +13,20 @@ from bilevel_planning.structs import (
 from bilevel_planning.trajectory_samplers.trajectory_sampler import (
     TrajectorySamplingFailure,
 )
-from geom2drobotenvs.object_types import CRVRobotType
-from geom2drobotenvs.structs import SE2Pose
-from geom2drobotenvs.utils import (
-    CRVRobotActionSpace,
-    rectangle_object_to_geom,
-    run_motion_planning_for_crv_robot,
-    state_has_collision,
-)
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
 from prbench.envs.geom2d.motion2d import (
     ObjectCentricMotion2DEnv,
     RectangleType,
     TargetRegionType,
+)
+from prbench.envs.geom2d.object_types import CRVRobotType
+from prbench.envs.geom2d.structs import SE2Pose
+from prbench.envs.geom2d.utils import (
+    CRVRobotActionSpace,
+    rectangle_object_to_geom,
+    run_motion_planning_for_crv_robot,
+    state_has_collision,
 )
 from relational_structs import (
     GroundAtom,
