@@ -7,7 +7,6 @@ for use with the bilevel planning framework.
 from .ground import (
     PickController,
     PlaceController,
-    PickAndPlaceController,
     create_bilevel_planning_models,
 )
 from .tidybot3d_utils import (
@@ -21,7 +20,6 @@ from .tidybot3d_utils import (
 __all__ = [
     "PickController",
     "PlaceController", 
-    "PickAndPlaceController",
     "create_bilevel_planning_models",
     "PickState",
     "PlaceState",

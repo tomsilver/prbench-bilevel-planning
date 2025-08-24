@@ -33,10 +33,9 @@ except ImportError:
     MotionPlannerPolicyMPWrapper = None
 
 # Import our implemented skills
-from src.prbench_bilevel_planning.env_models.tidybot3d import (
+from prbench_bilevel_planning.env_models.tidybot3d import (
     PickController,
     PlaceController,
-    PickAndPlaceController,
     TidybotStateConverter,
     create_tidybot_action,
 )
@@ -164,11 +163,14 @@ class TidybotBilevelDemo:
         step_count = 0
         while not pick_controller.terminated() and step_count < 100:
             action = pick_controller.step()
-            print(f"Step {step_count}: Generated action with base_pose={action['base_pose']}")
             
-            # Update state based on action (simplified simulation)
+            # Update state based on action (now uses MuJoCo state)
             self._update_state_from_action(action)
             pick_controller.observe(self.state)
+            
+            # Print current robot position and action
+            current_robot_pos = (self.state.get(self.robot, 'x'), self.state.get(self.robot, 'y'))
+            print(f"Step {step_count}: Robot at ({current_robot_pos[0]:.3f}, {current_robot_pos[1]:.3f}), Action base_pose={action['base_pose']}")
             
             step_count += 1
             
@@ -188,11 +190,12 @@ class TidybotBilevelDemo:
             return
         
         # Create place controller with target location
-        target_x, target_y = 1.0, 0.0
+        target_x, target_y, target_z = 0.0, 0.0, 0.5
         place_controller = PlaceController(
             objects=[self.robot, self.cube],
             target_x=target_x,
             target_y=target_y,
+            target_z=target_z,
             max_skill_horizon=100,
             env=self.env,  # Pass the MuJoCo environment
         )
@@ -205,13 +208,16 @@ class TidybotBilevelDemo:
         
         # Execute skill steps
         step_count = 0
-        while not place_controller.terminated() and step_count < 50:
+        while not place_controller.terminated() and step_count < 100:
             action = place_controller.step()
-            print(f"Step {step_count}: Generated action with base_pose={action['base_pose']}")
             
-            # Update state based on action (simplified simulation)
+            # Update state based on action (now uses MuJoCo state)
             self._update_state_from_action(action)
             place_controller.observe(self.state)
+            
+            # Print current robot position and action
+            current_robot_pos = (self.state.get(self.robot, 'x'), self.state.get(self.robot, 'y'))
+            print(f"Step {step_count}: Robot at ({current_robot_pos[0]:.3f}, {current_robot_pos[1]:.3f}), Action base_pose={action['base_pose']}")
             
             step_count += 1
             
@@ -222,55 +228,67 @@ class TidybotBilevelDemo:
         
         print(f"Place skill completed in {step_count} steps")
     
-    def demonstrate_pick_and_place_skill(self) -> None:
-        """Demonstrate the combined pick-and-place skill."""
-        print("\n=== Demonstrating Pick-and-Place Skill ===")
-        
-        if self.robot is None or self.cube is None or self.state is None:
-            print("Cannot demonstrate without proper state setup")
+    def _update_state_from_mujoco(self) -> None:
+        """Update the state from the actual MuJoCo environment."""
+        if self.env is None or self.robot is None:
             return
         
-        # Create pick-and-place controller
-        target_x, target_y = 1.2, -0.2
-        pick_place_controller = PickAndPlaceController(
-            objects=[self.robot, self.cube],
-            target_x=target_x,
-            target_y=target_y,
-            max_skill_horizon=200,
-            custom_grasp=False,
-            env=self.env,  # Pass the MuJoCo environment
-        )
+        # Get current observation from MuJoCo
+        obs = self.env.get_obs()
         
-        # Reset controller with current state
-        pick_place_controller.reset(self.state, params=0.0)
+        # Update robot state from MuJoCo observation
+        if "base_pose" in obs:
+            base_pose = obs["base_pose"]
+            robot_updates = {
+                "x": float(base_pose[0]),
+                "y": float(base_pose[1]), 
+                "theta": float(base_pose[2]),
+            }
+        else:
+            robot_updates = {}
+            
+        if "arm_pos" in obs:
+            arm_pos = obs["arm_pos"]
+            robot_updates.update({
+                "arm_x": float(arm_pos[0]),
+                "arm_y": float(arm_pos[1]),
+                "arm_z": float(arm_pos[2]),
+            })
+            
+        if "gripper_pos" in obs:
+            gripper_pos = obs["gripper_pos"]
+            robot_updates["gripper"] = float(gripper_pos[0])
         
-        print(f"Initial setup - Robot: ({self.state.get(self.robot, 'x'):.2f}, {self.state.get(self.robot, 'y'):.2f})")
-        print(f"Cube: ({self.state.get(self.cube, 'x'):.2f}, {self.state.get(self.cube, 'y'):.2f})")
-        print(f"Target: ({target_x:.2f}, {target_y:.2f})")
+        # Update cube positions from MuJoCo
+        cube_updates = {}
+        for key, value in obs.items():
+            if key.endswith("_pos") and "cube" in key:
+                cube_name = key.replace("_pos", "")
+                if cube_name == "cube1" and self.cube is not None:  # Update our tracked cube
+                    cube_updates = {
+                        "x": float(value[0]),
+                        "y": float(value[1]),
+                        "z": float(value[2]),
+                    }
+                    break
         
-        # Execute skill steps
-        step_count = 0
-        while not pick_place_controller.terminated() and step_count < 100:
-            action = pick_place_controller.step()
+        # Rebuild the state with updated values
+        new_state_dict = self._state_as_dict()
+        if robot_updates:
+            new_state_dict[self.robot] = {**new_state_dict[self.robot], **robot_updates}
+        if cube_updates and self.cube is not None:
+            new_state_dict[self.cube] = {**new_state_dict[self.cube], **cube_updates}
             
-            if step_count % 10 == 0:  # Print every 10th step
-                print(f"Step {step_count}: Base pose={action['base_pose']}, Gripper={action['gripper_pos'][0]:.2f}")
-            
-            # Update state based on action (simplified simulation)
-            self._update_state_from_action(action)
-            pick_place_controller.observe(self.state)
-            
-            step_count += 1
-            
-            # If using MuJoCo, execute action in environment
-            if self.env is not None:
-                self.env.step(action)
-                time.sleep(0.05)  # Faster for combined skill
-        
-        print(f"Pick-and-place skill completed in {step_count} steps")
-    
+        self.state = create_state_from_dict(new_state_dict, self.type_features)
+
     def _update_state_from_action(self, action: Dict[str, Any]) -> None:
         """Update the state based on the executed action (simplified simulation)."""
+        if self.env is not None:
+            # If using MuJoCo, get actual state from environment instead of simulation
+            self._update_state_from_mujoco()
+            return
+            
+        # Fallback to simplified simulation if no MuJoCo environment
         if self.state is None or self.robot is None:
             return
         
@@ -380,7 +398,7 @@ class TidybotBilevelDemo:
         
         # Demonstrate individual skills
         self.demonstrate_pick_skill()
-        # self.demonstrate_place_skill()
+        self.demonstrate_place_skill()
         
         # # Demonstrate combined skill
         # self.demonstrate_pick_and_place_skill()

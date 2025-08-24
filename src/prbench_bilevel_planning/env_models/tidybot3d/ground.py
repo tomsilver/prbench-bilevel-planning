@@ -174,7 +174,6 @@ class PickController(TidybotController):
             assert self.current_command is not None
             if self.grasp_state is None:
                 self.grasp_state = PickState.APPROACH
-                self.grasp_step_count = 0  # Initialize step counter
 
             target_arm_pos = arm_pos.copy()
             target_arm_quat = arm_quat.copy()
@@ -205,22 +204,16 @@ class PickController(TidybotController):
                 target_arm_pos = object_relative_pos
                 target_arm_quat = np.array([1.0, 0.0, 0.0, 0.0])
                 target_gripper_pos = np.array([0.0])
-                self.grasp_step_count += 1
-                # Allow more steps for approach (like the original 10 steps)
-                if self.grasp_step_count >= 10 and np.allclose(arm_pos, target_arm_pos, atol=0.05):
+                if np.allclose(arm_pos, target_arm_pos, atol=0.05):
                     self.grasp_state = PickState.LOWER
-                    self.grasp_step_count = 0
                     print("Transitioning from APPROACH to LOWER")
             elif self.grasp_state == PickState.LOWER:
                 target_arm_pos = object_relative_pos.copy()
                 target_arm_pos[2] -= self.PICK_LOWER_DIST
                 target_arm_quat = np.array([1.0, 0.0, 0.0, 0.0])
                 target_gripper_pos = np.array([0.0])
-                self.grasp_step_count += 1
-                # Allow more steps for lowering (like the original 8 steps)
-                if self.grasp_step_count >= 8 and np.allclose(arm_pos, target_arm_pos, atol=0.03):
+                if np.allclose(arm_pos, target_arm_pos, atol=0.03):
                     self.grasp_state = PickState.GRASP
-                    self.grasp_step_count = 0
                     print("Transitioning from LOWER to GRASP")
             elif self.grasp_state == PickState.GRASP:
                 target_arm_pos = object_relative_pos.copy()
@@ -230,17 +223,14 @@ class PickController(TidybotController):
                 if not hasattr(self, "grasp_start_time"):
                     self.grasp_start_time = time.time()
                     self.initial_gripper_pos = gripper_pos[0]
-                self.grasp_step_count += 1
                 
                 gripper_closed_enough = gripper_pos[0] > self.GRASP_SUCCESS_THRESHOLD
                 gripper_progress = (
                     gripper_pos[0] - self.initial_gripper_pos
                 ) > self.GRASP_PROGRESS_THRESHOLD
                 grasp_timeout = (time.time() - self.grasp_start_time) > self.GRASP_TIMEOUT_S
-                # Allow minimum steps for grasping (like the original 15 steps)
-                if self.grasp_step_count >= 15 and (gripper_closed_enough or gripper_progress or grasp_timeout):
+                if gripper_closed_enough or gripper_progress or grasp_timeout:
                     self.grasp_state = PickState.LIFT
-                    self.grasp_step_count = 0
                     delattr(self, "grasp_start_time")
                     delattr(self, "initial_gripper_pos")
                     print("Transitioning from GRASP to LIFT")
@@ -250,9 +240,7 @@ class PickController(TidybotController):
                 target_arm_pos = lifted_pos
                 target_arm_quat = np.array([1.0, 0.0, 0.0, 0.0])
                 target_gripper_pos = np.array([1.0])
-                self.grasp_step_count += 1
-                # Allow more steps for lifting (like the original 10 steps)
-                if self.grasp_step_count >= 10 and np.allclose(arm_pos, target_arm_pos, atol=0.05):
+                if np.allclose(arm_pos, target_arm_pos, atol=0.05):
                     self.episode_ended = True  # Pick complete
                     print("Pick manipulation completed!")
 
@@ -350,6 +338,7 @@ class PlaceController(TidybotController):
         objects: Sequence[Object],
         target_x: float = 1.0,
         target_y: float = 0.0,
+        target_z: float = 0.02,
         max_skill_horizon: int = 100,
         ee_offset: float = 0.12,
         env: Optional[Any] = None,
@@ -357,181 +346,10 @@ class PlaceController(TidybotController):
         super().__init__(objects, max_skill_horizon, ee_offset, env=env)
         self._target_x = target_x
         self._target_y = target_y
+        self._target_z = target_z
         
         # Set target location for placement
-        self.target_location = np.array([target_x, target_y, 0.02])  # Ground level
-
-    def reset(self, x: ObjectCentricState, params: tuple[float, ...] | float) -> None:
-        """Reset and restore target placement location."""
-        super().reset(x, params)
-        self.target_location = np.array([self._target_x, self._target_y, 0.02])
-
-    def _generate_plan(self, state: ObjectCentricState) -> List[Dict[str, Any]]:
-        """Generate a place plan based on the current state."""
-        plan = []
-        
-        # Convert state to observation format
-        obs = TidybotStateConverter.state_to_obs(state, self._robot)
-        base_pose = obs["base_pose"]
-        
-        # Create place command
-        place_command = {
-            "primitive_name": "place",
-            "waypoints": [base_pose[:2].tolist(), self.target_location[:2].tolist()],
-            "target_3d_pos": self.target_location.copy(),
-        }
-        
-        # Build base movement plan
-        base_command = self.build_base_command(place_command)
-        if base_command:
-            plan.extend(self._generate_base_movement_plan(base_command, obs))
-        # Always attempt manipulation even if base movement plan is empty
-        plan.extend(self._generate_place_manipulation_plan(obs))
-        
-        return plan
-
-    def _generate_base_movement_plan(
-        self, base_command: Dict[str, Any], obs: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """Generate base movement actions to reach the target with interpolation."""
-        plan: List[Dict[str, Any]] = []
-        base_pose = obs["base_pose"]
-        waypoints = base_command["waypoints"]
-        target_ee_pos = base_command["target_ee_pos"]
-        
-        # Interpolate along each waypoint segment
-        step_size = 0.05  # meters per step
-        current_xy = np.array([base_pose[0], base_pose[1]], dtype=float)
-        current_heading = float(base_pose[2])
-        
-        for waypoint in waypoints[1:]:  # Skip current position
-            waypoint_xy = np.array([float(waypoint[0]), float(waypoint[1])], dtype=float)
-            segment_vec = waypoint_xy - current_xy
-            segment_len = float(np.linalg.norm(segment_vec))
-            if segment_len < 1e-6:
-                current_xy = waypoint_xy
-                continue
-            num_steps = max(1, int(segment_len / step_size))
-            for i in range(1, num_steps + 1):
-                t = i / num_steps
-                pos_xy = current_xy + t * segment_vec
-                target_heading = current_heading
-                if target_ee_pos is not None:
-                    dx = float(target_ee_pos[0]) - pos_xy[0]
-                    dy = float(target_ee_pos[1]) - pos_xy[1]
-                    target_heading = math.atan2(dy, dx)
-                action = create_tidybot_action(
-                    base_pose=np.array([pos_xy[0], pos_xy[1], target_heading]),
-                    arm_pos=obs["arm_pos"],
-                    arm_quat=obs["arm_quat"],
-                    gripper_pos=np.array([1.0]),  # Keep gripper closed during movement
-                )
-                plan.append(action)
-            current_xy = waypoint_xy
-            current_heading = target_heading
-        
-        return plan
-
-    def _generate_place_manipulation_plan(self, obs: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Generate arm manipulation actions for placing."""
-        plan = []
-        base_pose = obs["base_pose"]
-        
-        # Calculate target position relative to base
-        global_diff = np.array([
-            self.target_location[0] - base_pose[0],
-            self.target_location[1] - base_pose[1],
-            self.target_location[2] + self.PLACE_APPROACH_HEIGHT_OFFSET - self.ROBOT_BASE_HEIGHT,
-        ])
-        
-        # Transform to base's local coordinate frame
-        base_angle = base_pose[2]
-        cos_angle = math.cos(-base_angle)
-        sin_angle = math.sin(-base_angle)
-        
-        target_relative_pos = np.array([
-            cos_angle * global_diff[0] - sin_angle * global_diff[1],
-            sin_angle * global_diff[0] + cos_angle * global_diff[1],
-            global_diff[2],
-        ])
-        
-        # Calculate lower position (at placement height)
-        global_diff_lower = np.array([
-            self.target_location[0] - base_pose[0],
-            self.target_location[1] - base_pose[1],
-            self.target_location[2] - self.ROBOT_BASE_HEIGHT,
-        ])
-        
-        target_relative_pos_lower = np.array([
-            cos_angle * global_diff_lower[0] - sin_angle * global_diff_lower[1],
-            sin_angle * global_diff_lower[0] + cos_angle * global_diff_lower[1],
-            global_diff_lower[2],
-        ])
-        
-        # Step 1: Approach - Position arm above placement location with closed gripper
-        approach_action = create_tidybot_action(
-            base_pose=base_pose.copy(),
-            arm_pos=target_relative_pos,
-            arm_quat=np.array([1.0, 0.0, 0.0, 0.0]),
-            gripper_pos=np.array([1.0]),  # Closed
-        )
-        plan.extend([approach_action] * 10)
-        
-        # Step 2: Lower - Lower arm to placement height
-        lower_action = create_tidybot_action(
-            base_pose=base_pose.copy(),
-            arm_pos=target_relative_pos_lower,
-            arm_quat=np.array([1.0, 0.0, 0.0, 0.0]),
-            gripper_pos=np.array([1.0]),
-        )
-        plan.extend([lower_action] * 8)
-        
-        # Step 3: Release - Open gripper to place object
-        release_action = create_tidybot_action(
-            base_pose=base_pose.copy(),
-            arm_pos=target_relative_pos_lower,
-            arm_quat=np.array([1.0, 0.0, 0.0, 0.0]),
-            gripper_pos=np.array([0.0]),  # Open
-        )
-        plan.extend([release_action] * 10)
-        
-        # Step 4: Home - Move arm to home position
-        arm_home_pos = np.array([0.14, 0.0, 0.21])
-        arm_home_quat = np.array([0.707, 0.707, 0, 0])
-        home_action = create_tidybot_action(
-            base_pose=base_pose.copy(),
-            arm_pos=arm_home_pos,
-            arm_quat=arm_home_quat,
-            gripper_pos=np.array([0.0]),
-        )
-        plan.extend([home_action] * 10)
-        
-        return plan
-
-
-class PickAndPlaceController(TidybotController):
-    """Combined controller for pick-and-place operations.
-    
-    This controller implements a complete pick-and-place sequence by first picking
-    up an object and then placing it at a target location.
-    """
-
-    def __init__(
-        self,
-        objects: Sequence[Object],
-        target_x: float = 1.0,
-        target_y: float = 0.0,
-        max_skill_horizon: int = 200,
-        ee_offset: float = 0.12,
-        custom_grasp: bool = False,
-        env: Optional[Any] = None,
-    ) -> None:
-        super().__init__(objects, max_skill_horizon, ee_offset, custom_grasp, env)
-        self._target_x = target_x
-        self._target_y = target_y
-        self._pick_phase = True
-        self.grasp_start_time: float = 0.0
-        self.initial_gripper_pos: float = 0.0
+        self.target_location = np.array([target_x, target_y, target_z])
 
     def get_end_effector_offset(self) -> float:
         """Calculate end-effector offset based on task and gripper state."""
@@ -547,53 +365,58 @@ class PickAndPlaceController(TidybotController):
             (float(pt2[0]) - float(pt1[0])) ** 2 + (float(pt2[1]) - float(pt1[1])) ** 2
         )
 
+    def reset(self, x: ObjectCentricState, params: tuple[float, ...] | float) -> None:
+        """Reset and restore target placement location."""
+        super().reset(x, params)
+        self.target_location = np.array([self._target_x, self._target_y, self._target_z])
+
     def _generate_plan(self, state: ObjectCentricState) -> List[Dict[str, Any]]:
-        """Generate a complete pick-and-place plan."""
-        # The _step_logic is now called from the TidybotController's step method,
-        # which has access to the updated obs. This method is now a thin wrapper.
-        return []
+        """Generate a place plan based on the current state."""
+        # This now acts as a state machine, returning one action at a time.
+        obs = TidybotStateConverter.state_to_obs(state, self._robot)
+        action = self._step_logic(obs)
+        if action is None:
+            self.episode_ended = True
+            return [self._create_hold_action()]
+        return [action]
 
     def _step_logic(self, obs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Process one step of the pick-and-place logic state machine."""
+        """Process one step of the place logic state machine."""
         base_pose = obs["base_pose"]
         arm_pos = obs["arm_pos"]
         arm_quat = obs["arm_quat"]
         gripper_pos = obs["gripper_pos"]
 
         if self.state == "idle":
-            detected_objects = self.detect_objects_from_obs(obs)
-            if not detected_objects:
-                return None
-            
-            self.object_location = detected_objects[0]
-            if (
-                not hasattr(self.object_location, "shape")
-                or len(self.object_location.shape) != 1
-                or self.object_location.shape[0] != 3
-            ):
-                return None
-            
-            self.target_location = np.array(
-                [self._target_x, self._target_y, 0.02]
-            )
-            pick_command: Dict[str, Any] = {
-                "primitive_name": "pick",
-                "waypoints": [
-                    base_pose[:2].tolist(),
-                    self.object_location[:2].tolist(),
-                ],
-                "object_3d_pos": self.object_location.copy(),
+            # Create place command
+            place_command = {
+                "primitive_name": "place",
+                "waypoints": [base_pose[:2].tolist(), self.target_location[:2].tolist()],
+                "target_3d_pos": self.target_location.copy(),
             }
-            base_command = self.build_base_command(pick_command)
+            base_command = self.build_base_command(place_command)
             if base_command:
-                self.current_command = pick_command
+                self.current_command = place_command
                 self.base_waypoints = base_command["waypoints"]
                 self.target_ee_pos = base_command["target_ee_pos"]
                 self.current_waypoint_idx = 1
                 self.lookahead_position = None
                 self.state = "moving"
+                # Return an action that keeps the gripper closed while transitioning to moving
+                return create_tidybot_action(
+                    base_pose=base_pose.copy(),
+                    arm_pos=arm_pos.copy(),
+                    arm_quat=arm_quat.copy(),
+                    gripper_pos=np.array([1.0]),  # Keep gripper closed
+                )
             else:
-                return None
+                # If command building fails, still keep gripper closed
+                return create_tidybot_action(
+                    base_pose=base_pose.copy(),
+                    arm_pos=arm_pos.copy(),
+                    arm_quat=arm_quat.copy(),
+                    gripper_pos=np.array([1.0]),  # Keep gripper closed
+                )
 
         elif self.state == "moving":
             action = self.execute_base_movement(obs)
@@ -639,226 +462,113 @@ class PickAndPlaceController(TidybotController):
 
         elif self.state == "manipulating":
             assert self.current_command is not None
-            if self._pick_phase:  # Pick manipulation
-                return self._handle_pick_manipulation(obs)
-            else:  # Place manipulation
-                return self._handle_place_manipulation(obs)
+            if self.grasp_state is None:
+                self.grasp_state = PlaceState.APPROACH
 
-        return self._create_hold_action()
+            # Define default targets to hold current pose
+            target_arm_pos = arm_pos.copy()
+            target_arm_quat = arm_quat.copy()
+            target_gripper_pos = gripper_pos.copy()
 
-    def _handle_pick_manipulation(
-        self, obs: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Handle the pick manipulation phase."""
-        base_pose = obs["base_pose"]
-        arm_pos = obs["arm_pos"]
-        gripper_pos = obs["gripper_pos"]
+            # Position arm above placement location
+            target_3d_pos = self.current_command["target_3d_pos"]
+            # Calculate global position difference for approach (above target)
+            global_diff = np.array(
+                [
+                    target_3d_pos[0] - base_pose[0],
+                    target_3d_pos[1] - base_pose[1],
+                    target_3d_pos[2]
+                    + self.PLACE_APPROACH_HEIGHT_OFFSET
+                    - self.ROBOT_BASE_HEIGHT,
+                ]
+            )
+            # For lowering, use no offset
+            global_diff_lower = np.array(
+                [
+                    target_3d_pos[0] - base_pose[0],
+                    target_3d_pos[1] - base_pose[1],
+                    target_3d_pos[2] - self.ROBOT_BASE_HEIGHT,
+                ]
+            )
+            # Transform to base's local coordinate frame (account for base rotation)
+            base_angle = base_pose[2]
+            cos_angle = math.cos(-base_angle)
+            sin_angle = math.sin(-base_angle)
+            target_relative_pos = np.array(
+                [
+                    cos_angle * global_diff[0] - sin_angle * global_diff[1],
+                    sin_angle * global_diff[0] + cos_angle * global_diff[1],
+                    global_diff[2],
+                ]
+            )
+            target_relative_pos_lower = np.array(
+                [
+                    cos_angle * global_diff_lower[0]
+                    - sin_angle * global_diff_lower[1],
+                    sin_angle * global_diff_lower[0]
+                    + cos_angle * global_diff_lower[1],
+                    global_diff_lower[2],
+                ]
+            )
+            # Home position (in base frame) - exact values from mp_policy
+            arm_home_pos = np.array([0.14322269, 0.0, 0.20784938])
+            arm_home_quat = np.array([0.707, 0.707, 0, 0])
 
-        if self.grasp_state is None:
-            self.grasp_state = PickState.APPROACH
-            self.grasp_step_count = 0  # Initialize step counter
+            print(f"Placing: target_relative_pos = {target_relative_pos}")
+            print(f"Target EE pos: {self.target_ee_pos}, Base pose: {base_pose}")
+            print(f"Grasp state: {self.grasp_state}")
 
-        assert self.current_command is not None
-        object_3d_pos = self.current_command["object_3d_pos"]
-        global_diff = np.array(
-            [
-                object_3d_pos[0] - base_pose[0],
-                object_3d_pos[1] - base_pose[1],
-                object_3d_pos[2]
-                + self.PICK_APPROACH_HEIGHT_OFFSET
-                - self.ROBOT_BASE_HEIGHT,
-            ]
-        )
-        base_angle = base_pose[2]
-        cos_angle = math.cos(-base_angle)
-        sin_angle = math.sin(-base_angle)
-        object_relative_pos = np.array(
-            [
-                cos_angle * global_diff[0] - sin_angle * global_diff[1],
-                sin_angle * global_diff[0] + cos_angle * global_diff[1],
-                global_diff[2],
-            ]
-        )
+            if self.grasp_state == PlaceState.APPROACH:
+                # Step 1: Position arm above placement location with closed gripper
+                target_arm_pos = target_relative_pos
+                target_arm_quat = np.array([1.0, 0.0, 0.0, 0.0])
+                target_gripper_pos = np.array([1.0])
+                print("Step 1: Positioning arm above placement location with closed gripper")
+                if np.allclose(arm_pos, target_arm_pos, atol=0.03):
+                    self.grasp_state = PlaceState.LOWER
+                    print("Arm above placement, lowering...")
+            elif self.grasp_state == PlaceState.LOWER:
+                # Step 2: Lower arm to placement height
+                target_arm_pos = target_relative_pos_lower
+                target_arm_quat = np.array([1.0, 0.0, 0.0, 0.0])
+                target_gripper_pos = np.array([1.0])
+                print("Step 2: Lowering arm to placement height")
+                if np.allclose(arm_pos, target_arm_pos, atol=0.02):
+                    self.grasp_state = PlaceState.RELEASE
+                    print("Arm at placement height, opening gripper...")
+            elif self.grasp_state == PlaceState.RELEASE:
+                # Step 3: Open gripper to place object
+                target_arm_pos = target_relative_pos_lower
+                target_arm_quat = np.array([1.0, 0.0, 0.0, 0.0])
+                target_gripper_pos = np.array([0.0])
+                print("Step 3: Opening gripper to release object")
+                if gripper_pos[0] < self.PLACE_SUCCESS_THRESHOLD:
+                    self.grasp_state = PlaceState.HOME
+                    print("Object placed, moving to home position...")
+            elif self.grasp_state == PlaceState.HOME:
+                # Step 4: Move arm to home position
+                target_arm_pos = arm_home_pos
+                target_arm_quat = arm_home_quat
+                target_gripper_pos = np.array([0.0])
+                print("Step 4: Moving arm to home position")
+                if np.allclose(arm_pos, target_arm_pos, atol=0.03):
+                    print("Arm at home position. Task complete.")
+                    self.episode_ended = True
 
-        target_arm_pos = arm_pos.copy()
-        target_arm_quat = np.array([1.0, 0.0, 0.0, 0.0])
-        target_gripper_pos = gripper_pos.copy()
-
-        if self.grasp_state == PickState.APPROACH:
-            target_arm_pos = object_relative_pos
-            target_gripper_pos = np.array([0.0])
-            self.grasp_step_count += 1
-            if self.grasp_step_count >= 10 and np.allclose(arm_pos, target_arm_pos, atol=0.05):
-                self.grasp_state = PickState.LOWER
-                self.grasp_step_count = 0
-                print("Pick: Transitioning from APPROACH to LOWER")
-        elif self.grasp_state == PickState.LOWER:
-            target_arm_pos = object_relative_pos.copy()
-            target_arm_pos[2] -= self.PICK_LOWER_DIST
-            target_gripper_pos = np.array([0.0])
-            self.grasp_step_count += 1
-            if self.grasp_step_count >= 8 and np.allclose(arm_pos, target_arm_pos, atol=0.03):
-                self.grasp_state = PickState.GRASP
-                self.grasp_step_count = 0
-                print("Pick: Transitioning from LOWER to GRASP")
-        elif self.grasp_state == PickState.GRASP:
-            target_arm_pos = object_relative_pos.copy()
-            target_arm_pos[2] -= self.PICK_LOWER_DIST
-            target_gripper_pos = np.array([1.0])
-            if self.grasp_start_time == 0.0:
-                self.grasp_start_time = time.time()
-                self.initial_gripper_pos = gripper_pos[0]
-            self.grasp_step_count += 1
-            
-            gripper_closed_enough = gripper_pos[0] > self.GRASP_SUCCESS_THRESHOLD
-            gripper_progress = (
-                gripper_pos[0] - self.initial_gripper_pos
-            ) > self.GRASP_PROGRESS_THRESHOLD
-            grasp_timeout = (
-                time.time() - self.grasp_start_time
-            ) > self.GRASP_TIMEOUT_S
-            if self.grasp_step_count >= 15 and (gripper_closed_enough or gripper_progress or grasp_timeout):
-                self.grasp_state = PickState.LIFT
-                self.grasp_step_count = 0
-                self.grasp_start_time = 0.0
-                print("Pick: Transitioning from GRASP to LIFT")
-        elif self.grasp_state == PickState.LIFT:
-            lifted_pos = object_relative_pos.copy()
-            lifted_pos[2] += self.PICK_LIFT_DIST - self.PICK_LOWER_DIST
-            target_arm_pos = lifted_pos
-            target_gripper_pos = np.array([1.0])
-            self.grasp_step_count += 1
-            if self.grasp_step_count >= 10 and np.allclose(arm_pos, target_arm_pos, atol=0.05):
-                # Transition to place
-                self._pick_phase = False
-                self.grasp_state = None  # Reset for place
-                assert self.target_location is not None
-                place_command: Dict[str, Any] = {
-                    "primitive_name": "place",
-                    "waypoints": [
-                        base_pose[:2].tolist(),
-                        self.target_location[:2].tolist(),
-                    ],
-                    "target_3d_pos": self.target_location.copy(),
-                }
-                base_command = self.build_base_command(place_command)
-                if base_command:
-                    self.current_command = place_command
-                    self.base_waypoints = base_command["waypoints"]
-                    self.target_ee_pos = base_command["target_ee_pos"]
-                    self.current_waypoint_idx = 1
-                    self.lookahead_position = None
-                    self.state = "moving"
-                    print("Pick completed, transitioning to place phase")
-                else:
-                    return None  # Failed to build command
+            # Create action from targets
+            return create_tidybot_action(
+                base_pose=base_pose.copy(),
+                arm_pos=target_arm_pos,
+                arm_quat=target_arm_quat,
+                gripper_pos=target_gripper_pos,
+            )
         
+        # Fallback: hold current position with gripper closed (for place controller)
         return create_tidybot_action(
             base_pose=base_pose.copy(),
-            arm_pos=target_arm_pos,
-            arm_quat=target_arm_quat,
-            gripper_pos=target_gripper_pos,
-        )
-    
-    def _handle_place_manipulation(
-        self, obs: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Handle the place manipulation phase."""
-        base_pose = obs["base_pose"]
-        arm_pos = obs["arm_pos"]
-        gripper_pos = obs["gripper_pos"]
-
-        if self.grasp_state is None:
-            self.grasp_state = PlaceState.APPROACH
-            self.grasp_step_count = 0  # Initialize step counter for place
-        
-        assert self.current_command is not None
-        target_3d_pos = self.current_command["target_3d_pos"]
-        
-        # Approach position
-        global_diff = np.array(
-            [
-                target_3d_pos[0] - base_pose[0],
-                target_3d_pos[1] - base_pose[1],
-                target_3d_pos[2]
-                + self.PLACE_APPROACH_HEIGHT_OFFSET
-                - self.ROBOT_BASE_HEIGHT,
-            ]
-        )
-        base_angle = base_pose[2]
-        cos_angle = math.cos(-base_angle)
-        sin_angle = math.sin(-base_angle)
-        target_relative_pos = np.array(
-            [
-                cos_angle * global_diff[0] - sin_angle * global_diff[1],
-                sin_angle * global_diff[0] + cos_angle * global_diff[1],
-                global_diff[2],
-            ]
-        )
-
-        # Lower position
-        global_diff_lower = np.array(
-            [
-                target_3d_pos[0] - base_pose[0],
-                target_3d_pos[1] - base_pose[1],
-                target_3d_pos[2] - self.ROBOT_BASE_HEIGHT,
-            ]
-        )
-        target_relative_pos_lower = np.array(
-            [
-                cos_angle * global_diff_lower[0]
-                - sin_angle * global_diff_lower[1],
-                sin_angle * global_diff_lower[0]
-                + cos_angle * global_diff_lower[1],
-                global_diff_lower[2],
-            ]
-        )
-        
-        arm_home_pos = np.array([0.14, 0.0, 0.21])
-        arm_home_quat = np.array([0.707, 0.707, 0, 0])
-
-        target_arm_pos = arm_pos.copy()
-        target_arm_quat = np.array([1.0, 0.0, 0.0, 0.0])
-        target_gripper_pos = gripper_pos.copy()
-
-        if self.grasp_state == PlaceState.APPROACH:
-            target_arm_pos = target_relative_pos
-            target_gripper_pos = np.array([1.0])
-            self.grasp_step_count += 1
-            if self.grasp_step_count >= 10 and np.allclose(arm_pos, target_arm_pos, atol=0.03):
-                self.grasp_state = PlaceState.LOWER
-                self.grasp_step_count = 0
-                print("Place: Transitioning from APPROACH to LOWER")
-        elif self.grasp_state == PlaceState.LOWER:
-            target_arm_pos = target_relative_pos_lower
-            target_gripper_pos = np.array([1.0])
-            self.grasp_step_count += 1
-            if self.grasp_step_count >= 8 and np.allclose(arm_pos, target_arm_pos, atol=0.02):
-                self.grasp_state = PlaceState.RELEASE
-                self.grasp_step_count = 0
-                print("Place: Transitioning from LOWER to RELEASE")
-        elif self.grasp_state == PlaceState.RELEASE:
-            target_arm_pos = target_relative_pos_lower
-            target_gripper_pos = np.array([0.0])
-            self.grasp_step_count += 1
-            if self.grasp_step_count >= 10 and gripper_pos[0] < self.PLACE_SUCCESS_THRESHOLD:
-                self.grasp_state = PlaceState.HOME
-                self.grasp_step_count = 0
-                print("Place: Transitioning from RELEASE to HOME")
-        elif self.grasp_state == PlaceState.HOME:
-            target_arm_pos = arm_home_pos
-            target_arm_quat = arm_home_quat
-            target_gripper_pos = np.array([0.0])
-            self.grasp_step_count += 1
-            if self.grasp_step_count >= 10 and np.allclose(arm_pos, target_arm_pos, atol=0.03):
-                self.episode_ended = True
-                print("Place manipulation completed!")
-
-        return create_tidybot_action(
-            base_pose=base_pose.copy(),
-            arm_pos=target_arm_pos,
-            arm_quat=target_arm_quat,
-            gripper_pos=target_gripper_pos,
+            arm_pos=arm_pos.copy(),
+            arm_quat=arm_quat.copy(),
+            gripper_pos=np.array([1.0]),  # Keep gripper closed
         )
 
     def execute_base_movement(
@@ -930,7 +640,7 @@ class PickAndPlaceController(TidybotController):
             ),
             arm_pos=obs["arm_pos"].copy(),
             arm_quat=obs["arm_quat"].copy(),
-            gripper_pos=obs["gripper_pos"].copy(),
+            gripper_pos=np.array([1.0]),  # Keep gripper closed during movement
         )
 
 
@@ -978,23 +688,12 @@ def create_bilevel_planning_models(
     )
     
     # Place skill with parameterized target location
-    controllers["place"] = lambda target_x=1.0, target_y=0.0: PlaceController(
+    controllers["place"] = lambda target_x=1.0, target_y=0.0, target_z=0.02: PlaceController(
         objects,
         target_x=target_x,
         target_y=target_y,
+        target_z=target_z,
         max_skill_horizon=kwargs.get("max_skill_horizon", 100),
-        env=env,
-    )
-    
-    # Combined pick-and-place skill
-    controllers[
-        "pick_and_place"
-    ] = lambda target_x=1.0, target_y=0.0: PickAndPlaceController(
-        objects,
-        target_x=target_x,
-        target_y=target_y,
-        max_skill_horizon=kwargs.get("max_skill_horizon", 200),
-        custom_grasp=kwargs.get("custom_grasp", False),
         env=env,
     )
     

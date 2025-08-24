@@ -244,18 +244,18 @@ class TidybotController(GroundParameterizedController):
                 cube_pos = obs[key]
                 cube_name = key.replace("_pos", "")
                 cubes.append((cube_pos, cube_name))
-
+        
         if cubes:
             if self._custom_grasp:
                 cubes.sort(key=lambda x: x[0][1])  # Sort by y
             else:
                 cubes.sort(key=lambda x: x[0][0])  # Sort by x
-            target_cube_pos, target_cube_name = cubes[0]
+                target_cube_pos, target_cube_name = cubes[0]
             print(
                 f"Selected target object '{target_cube_name}' at pose: {target_cube_pos}"
             )
             detected_objects.append(target_cube_pos)
-
+        
         return detected_objects
 
     def distance(
