@@ -126,10 +126,21 @@ def create_bilevel_planning_models(
 ) -> SesameModels:
     """Load bilevel planning models for the given environment."""
     current_file = Path(__file__).resolve()
-    env_path = current_file.parent / "geom2d" / f"{env_name}.py"
-
-    if not env_path.exists():
-        raise FileNotFoundError(f"No model file found for environment: {env_path}")
+    
+    # Try different directories based on environment type
+    possible_paths = [
+        current_file.parent / "geom2d" / f"{env_name}.py",
+        current_file.parent / "tidybot3d" / f"{env_name}.py",
+    ]
+    
+    env_path = None
+    for path in possible_paths:
+        if path.exists():
+            env_path = path
+            break
+    
+    if env_path is None:
+        raise FileNotFoundError(f"No model file found for environment '{env_name}' in any of: {possible_paths}")
 
     module_name = f"{env_name}_module"
     spec = importlib.util.spec_from_file_location(module_name, env_path)

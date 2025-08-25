@@ -12,11 +12,26 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from bilevel_planning.structs import (
     GroundParameterizedController,
+    LiftedParameterizedController,
+    LiftedSkill,
+    RelationalAbstractGoal,
+    RelationalAbstractState,
     SesameModels,
 )
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
-from relational_structs import Object, ObjectCentricState
+from relational_structs import (
+    GroundAtom,
+    LiftedAtom,
+    LiftedOperator,
+    Object,
+    ObjectCentricState,
+    Predicate,
+    Variable,
+)
+from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
+
+from prbench.envs.tidybot.tidybot_mujoco_env import MujocoEnv
 
 from .tidybot3d_utils import (
     PickState,
@@ -25,23 +40,6 @@ from .tidybot3d_utils import (
     TidybotStateConverter,
     create_tidybot_action,
 )
-
-
-class TidybotGroundModel:
-    """A ground model that wraps the Tidybot environment and updates state."""
-
-    def __init__(
-        self, env: Any, state_converter: TidybotStateConverter, robot: Object
-    ) -> None:
-        self._env = env
-        self._state_converter = state_converter
-        self._robot = robot
-
-    def get_observation(self, x: ObjectCentricState) -> Dict[str, Any]:
-        """Get the latest observation and update the state converter."""
-        obs = self._env.get_observation()
-        self._state_converter.update_obs(obs)
-        return self._state_converter.state_to_obs(x, self._robot)
 
 
 class PickController(TidybotController):
@@ -146,7 +144,9 @@ class PickController(TidybotController):
                         base_tolerance = self.GRASP_BASE_TOLERANCE
                     else:
                         base_tolerance = self.PLACE_BASE_TOLERANCE
-                    print(f"Base tolerance for {self.current_command['primitive_name']}: {base_tolerance:.3f}")
+                    print(
+                        f"Base tolerance for {self.current_command['primitive_name']}: {base_tolerance:.3f}"
+                    )
                     if diff < base_tolerance:
                         self.state = "manipulating"
                         print("Base reached target, starting arm manipulation")
@@ -155,15 +155,19 @@ class PickController(TidybotController):
                             f"Too far from target end effector position ({(100 * diff):.1f} cm), tolerance: {(100 * base_tolerance):.1f} cm"
                         )
                         # Instead of going to idle immediately, let's try a few more times
-                        if not hasattr(self, 'positioning_attempts'):
+                        if not hasattr(self, "positioning_attempts"):
                             self.positioning_attempts = 0
                         self.positioning_attempts += 1
                         if self.positioning_attempts >= 3:
-                            print("Max positioning attempts reached, proceeding with manipulation anyway")
+                            print(
+                                "Max positioning attempts reached, proceeding with manipulation anyway"
+                            )
                             self.state = "manipulating"
                             self.positioning_attempts = 0
                         else:
-                            print(f"Positioning attempt {self.positioning_attempts}/3, retrying...")
+                            print(
+                                f"Positioning attempt {self.positioning_attempts}/3, retrying..."
+                            )
                             self.state = "idle"  # Reset to try again
                 else:
                     self.state = "manipulating"  # No target_ee_pos, proceed anyway
@@ -223,12 +227,14 @@ class PickController(TidybotController):
                 if not hasattr(self, "grasp_start_time"):
                     self.grasp_start_time = time.time()
                     self.initial_gripper_pos = gripper_pos[0]
-                
+
                 gripper_closed_enough = gripper_pos[0] > self.GRASP_SUCCESS_THRESHOLD
                 gripper_progress = (
                     gripper_pos[0] - self.initial_gripper_pos
                 ) > self.GRASP_PROGRESS_THRESHOLD
-                grasp_timeout = (time.time() - self.grasp_start_time) > self.GRASP_TIMEOUT_S
+                grasp_timeout = (
+                    time.time() - self.grasp_start_time
+                ) > self.GRASP_TIMEOUT_S
                 if gripper_closed_enough or gripper_progress or grasp_timeout:
                     self.grasp_state = PickState.LIFT
                     delattr(self, "grasp_start_time")
@@ -250,12 +256,10 @@ class PickController(TidybotController):
                 arm_quat=target_arm_quat,
                 gripper_pos=target_gripper_pos,
             )
-        
+
         return self._create_hold_action()
 
-    def execute_base_movement(
-        self, obs: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    def execute_base_movement(self, obs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Execute base movement following waypoints like BaseController."""
         base_pose = obs["base_pose"]
 
@@ -299,21 +303,15 @@ class PickController(TidybotController):
             if self.lookahead_position is not None:
                 remaining_path_length = self.LOOKAHEAD_DISTANCE
                 curr_waypoint = self.lookahead_position
-                for idx in range(
-                    self.current_waypoint_idx, len(self.base_waypoints)
-                ):
+                for idx in range(self.current_waypoint_idx, len(self.base_waypoints)):
                     next_waypoint = self.base_waypoints[idx]
-                    remaining_path_length += self.distance(
-                        curr_waypoint, next_waypoint
-                    )
+                    remaining_path_length += self.distance(curr_waypoint, next_waypoint)
                     curr_waypoint = next_waypoint
                 frac = math.sqrt(
                     self.LOOKAHEAD_DISTANCE
                     / max(remaining_path_length, self.LOOKAHEAD_DISTANCE)
                 )
-            heading_diff = self.restrict_heading_range(
-                desired_heading - base_pose[2]
-            )
+            heading_diff = self.restrict_heading_range(desired_heading - base_pose[2])
             target_heading += frac * heading_diff
 
         return create_tidybot_action(
@@ -322,7 +320,7 @@ class PickController(TidybotController):
             ),
             arm_pos=obs["arm_pos"].copy(),
             arm_quat=obs["arm_quat"].copy(),
-            gripper_pos=obs["gripper_pos"].copy(),
+            gripper_pos=np.array([1.0]),  # Keep gripper closed during movement
         )
 
 
@@ -368,7 +366,9 @@ class PlaceController(TidybotController):
     def reset(self, x: ObjectCentricState, params: tuple[float, ...] | float) -> None:
         """Reset and restore target placement location."""
         super().reset(x, params)
-        self.target_location = np.array([self._target_x, self._target_y, self._target_z])
+        self.target_location = np.array(
+            [self._target_x, self._target_y, self._target_z]
+        )
 
     def _generate_plan(self, state: ObjectCentricState) -> List[Dict[str, Any]]:
         """Generate a place plan based on the current state."""
@@ -386,12 +386,15 @@ class PlaceController(TidybotController):
         arm_pos = obs["arm_pos"]
         arm_quat = obs["arm_quat"]
         gripper_pos = obs["gripper_pos"]
-
+        
         if self.state == "idle":
             # Create place command
             place_command = {
                 "primitive_name": "place",
-                "waypoints": [base_pose[:2].tolist(), self.target_location[:2].tolist()],
+                    "waypoints": [
+                        base_pose[:2].tolist(),
+                        self.target_location[:2].tolist(),
+                    ],
                 "target_3d_pos": self.target_location.copy(),
             }
             base_command = self.build_base_command(place_command)
@@ -436,7 +439,9 @@ class PlaceController(TidybotController):
                         base_tolerance = self.GRASP_BASE_TOLERANCE
                     else:
                         base_tolerance = self.PLACE_BASE_TOLERANCE
-                    print(f"Base tolerance for {self.current_command['primitive_name']}: {base_tolerance:.3f}")
+                    print(
+                        f"Base tolerance for {self.current_command['primitive_name']}: {base_tolerance:.3f}"
+                    )
                     if diff < base_tolerance:
                         self.state = "manipulating"
                         print("Base reached target, starting arm manipulation")
@@ -445,15 +450,19 @@ class PlaceController(TidybotController):
                             f"Too far from target end effector position ({(100 * diff):.1f} cm), tolerance: {(100 * base_tolerance):.1f} cm"
                         )
                         # Instead of going to idle immediately, let's try a few more times
-                        if not hasattr(self, 'positioning_attempts'):
+                        if not hasattr(self, "positioning_attempts"):
                             self.positioning_attempts = 0
                         self.positioning_attempts += 1
                         if self.positioning_attempts >= 3:
-                            print("Max positioning attempts reached, proceeding with manipulation anyway")
+                            print(
+                                "Max positioning attempts reached, proceeding with manipulation anyway"
+                            )
                             self.state = "manipulating"
                             self.positioning_attempts = 0
                         else:
-                            print(f"Positioning attempt {self.positioning_attempts}/3, retrying...")
+                            print(
+                                f"Positioning attempt {self.positioning_attempts}/3, retrying..."
+                            )
                             self.state = "idle"  # Reset to try again
                 else:
                     self.state = "manipulating"  # No target_ee_pos, proceed anyway
@@ -503,10 +512,8 @@ class PlaceController(TidybotController):
             )
             target_relative_pos_lower = np.array(
                 [
-                    cos_angle * global_diff_lower[0]
-                    - sin_angle * global_diff_lower[1],
-                    sin_angle * global_diff_lower[0]
-                    + cos_angle * global_diff_lower[1],
+                    cos_angle * global_diff_lower[0] - sin_angle * global_diff_lower[1],
+                    sin_angle * global_diff_lower[0] + cos_angle * global_diff_lower[1],
                     global_diff_lower[2],
                 ]
             )
@@ -523,7 +530,9 @@ class PlaceController(TidybotController):
                 target_arm_pos = target_relative_pos
                 target_arm_quat = np.array([1.0, 0.0, 0.0, 0.0])
                 target_gripper_pos = np.array([1.0])
-                print("Step 1: Positioning arm above placement location with closed gripper")
+                print(
+                    "Step 1: Positioning arm above placement location with closed gripper"
+                )
                 if np.allclose(arm_pos, target_arm_pos, atol=0.03):
                     self.grasp_state = PlaceState.LOWER
                     print("Arm above placement, lowering...")
@@ -562,7 +571,7 @@ class PlaceController(TidybotController):
                 arm_quat=target_arm_quat,
                 gripper_pos=target_gripper_pos,
             )
-        
+
         # Fallback: hold current position with gripper closed (for place controller)
         return create_tidybot_action(
             base_pose=base_pose.copy(),
@@ -571,9 +580,7 @@ class PlaceController(TidybotController):
             gripper_pos=np.array([1.0]),  # Keep gripper closed
         )
 
-    def execute_base_movement(
-        self, obs: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    def execute_base_movement(self, obs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Execute base movement following waypoints like BaseController."""
         base_pose = obs["base_pose"]
 
@@ -617,21 +624,15 @@ class PlaceController(TidybotController):
             if self.lookahead_position is not None:
                 remaining_path_length = self.LOOKAHEAD_DISTANCE
                 curr_waypoint = self.lookahead_position
-                for idx in range(
-                    self.current_waypoint_idx, len(self.base_waypoints)
-                ):
+                for idx in range(self.current_waypoint_idx, len(self.base_waypoints)):
                     next_waypoint = self.base_waypoints[idx]
-                    remaining_path_length += self.distance(
-                        curr_waypoint, next_waypoint
-                    )
+                    remaining_path_length += self.distance(curr_waypoint, next_waypoint)
                     curr_waypoint = next_waypoint
                 frac = math.sqrt(
                     self.LOOKAHEAD_DISTANCE
                     / max(remaining_path_length, self.LOOKAHEAD_DISTANCE)
                 )
-            heading_diff = self.restrict_heading_range(
-                desired_heading - base_pose[2]
-            )
+            heading_diff = self.restrict_heading_range(desired_heading - base_pose[2])
             target_heading += frac * heading_diff
 
         return create_tidybot_action(
@@ -645,73 +646,311 @@ class PlaceController(TidybotController):
 
 
 def create_bilevel_planning_models(
-    observation_space: Space, executable_space: Space, **kwargs
+    observation_space: Space, action_space: Space, **kwargs
 ) -> SesameModels:
     """Create bilevel planning models for tidybot ground scene.
     
-    This function creates the necessary models for bilevel planning in the
-    tidybot ground scene environment, including pick and place controllers.
+    This function creates the necessary models for bilevel planning in the tidybot
+    ground scene environment, including pick and place controllers.
     """
-    # Create dummy objects for the models (these will be replaced at runtime)
-    from relational_structs import Type
-    
-    robot_type = Type(
-        "robot", ["x", "y", "theta", "arm_x", "arm_y", "arm_z", "gripper"]
-    )
-    cube_type = Type("cube", ["x", "y", "z"])
-    
-    robot = Object("robot", robot_type)
-    cube = Object("cube1", cube_type)
-    
-    objects = [robot, cube]
+    assert isinstance(observation_space, ObjectCentricBoxSpace)
 
-    # The global state converter is now used, so no need to instantiate here.
+    # Import required types and functions
+    from relational_structs import Type
+    from prbench_bilevel_planning.env_models.tidybot3d.object_centric_adapter import observation_to_object_centric_state
     
-    # Create type features for state creation
-    type_features = {
-        robot_type: ["x", "y", "theta", "arm_x", "arm_y", "arm_z", "gripper"],
-        cube_type: ["x", "y", "z"],
+    # Create environment simulator if available
+    sim = kwargs.get("env")
+    if sim is None:
+        sim = MujocoEnv(
+            render_images=False,
+            show_viewer=False,
+            table_scene=False,  # Use ground scene
+            cupboard_scene=False,
+        )
+
+    # Convert observations into states
+    def observation_to_state(o: NDArray[np.float32]) -> ObjectCentricState:
+        """Convert the vectors back into (hashable) object-centric states."""
+        # Use the adapter to convert from raw TidyBot3D observation to ObjectCentricState
+        return observation_to_object_centric_state(o)
+
+    # Create the transition function
+    def transition_fn(
+        x: ObjectCentricState,
+        u: NDArray[np.float32],
+    ) -> ObjectCentricState:
+        """Simulate the action and return the resulting state."""
+        if sim is None:
+            # Fallback: return the same state if no simulator available
+            return x.copy()
+        
+        # Note: This MujocoEnv doesn't support setting initial state from ObjectCentricState
+        # So we just reset and step, which is a simplified transition model
+        sim.reset()
+        sim.step(u)
+        obs_dict = sim.get_obs()
+        
+        # Convert the observation dict to a vectorized observation
+        obs_vector = []
+        for key in sorted(obs_dict.keys()):  # Sort for consistency
+            if not key.endswith('_image'):  # Skip image data
+                value = obs_dict[key]
+                obs_vector.extend(value.flatten())
+        obs_array = np.array(obs_vector, dtype=np.float32)
+        
+        # Convert the vectorized observation back to ObjectCentricState
+        try:
+            next_state = observation_to_object_centric_state(obs_array)
+            return next_state
+        except Exception:
+            # If conversion fails, return the current state as fallback
+            return x.copy()
+
+    # Types
+    robot_type = Type("robot")
+    cube_type = Type("cube")
+    target_type = Type("target")  # Target location
+    types = {robot_type, cube_type, target_type}
+
+    # Create the state space
+    state_space = ObjectCentricStateSpace(types)
+
+    # Predicates
+    Holding = Predicate("Holding", [robot_type, cube_type])
+    HandEmpty = Predicate("HandEmpty", [robot_type])
+    OnGround = Predicate("OnGround", [cube_type])
+    OnTarget = Predicate("OnTarget", [cube_type])
+    predicates = {Holding, HandEmpty, OnGround, OnTarget}
+
+    # State abstractor
+    def state_abstractor(x: ObjectCentricState) -> RelationalAbstractState:
+        """Get the abstract state for the current state."""
+        robot = Object("robot", robot_type)
+        cubes = x.get_objects(cube_type)
+        targets = x.get_objects(target_type)
+
+        atoms: set[GroundAtom] = set()
+
+        # Check if robot is holding any cube
+        holding_any = False
+        for cube in cubes:
+            # Simple heuristic: if gripper is closed and cube is near robot arm
+            gripper_pos = x.get(robot, "gripper")
+            if gripper_pos > 0.5:  # Gripper closed threshold
+                arm_x = x.get(robot, "arm_x") + x.get(robot, "x")
+                arm_y = x.get(robot, "arm_y") + x.get(robot, "y")
+                arm_z = x.get(robot, "arm_z")
+                cube_x = x.get(cube, "x")
+                cube_y = x.get(cube, "y")
+                cube_z = x.get(cube, "z")
+
+                # Check if cube is close to arm position
+                distance = math.sqrt(
+                    (arm_x - cube_x) ** 2
+                    + (arm_y - cube_y) ** 2
+                    + (arm_z - cube_z) ** 2
+                )
+                if distance < 0.1:  # Close enough threshold
+                    atoms.add(GroundAtom(Holding, [robot, cube]))
+                    holding_any = True
+                    break
+
+        if not holding_any:
+            atoms.add(GroundAtom(HandEmpty, [robot]))
+
+        # Check cube positions
+        for cube in cubes:
+            cube_z = x.get(cube, "z")
+            if cube_z < 0.05:  # On ground threshold
+                # Check if cube is on target
+                on_target = False
+                for target in targets:
+                    target_x = x.get(target, "x")
+                    target_y = x.get(target, "y")
+                    cube_x = x.get(cube, "x")
+                    cube_y = x.get(cube, "y")
+                    distance = math.sqrt(
+                        (target_x - cube_x) ** 2 + (target_y - cube_y) ** 2
+                    )
+                    if distance < 0.1:  # On target threshold
+                        atoms.add(GroundAtom(OnTarget, [cube]))
+                        on_target = True
+                        break
+
+                if not on_target:
+                    atoms.add(GroundAtom(OnGround, [cube]))
+
+        objects = {robot} | set(cubes) | set(targets)
+        return RelationalAbstractState(atoms, objects)
+
+    # Goal abstractor
+    def goal_deriver(x: ObjectCentricState) -> RelationalAbstractGoal:
+        """The goal is to place all cubes on targets."""
+        cubes = x.get_objects(cube_type)
+        atoms = set()
+        for cube in cubes:
+            atoms.add(GroundAtom(OnTarget, [cube]))
+        return RelationalAbstractGoal(atoms, state_abstractor)
+
+    # Operators
+    robot = Variable("?robot", robot_type)
+    cube = Variable("?cube", cube_type)
+
+    PickFromGroundOperator = LiftedOperator(
+        "PickFromGround",
+        [robot, cube],
+        preconditions={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnGround, [cube])},
+        add_effects={LiftedAtom(Holding, [robot, cube])},
+        delete_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnGround, [cube])},
+    )
+
+    PickFromTargetOperator = LiftedOperator(
+        "PickFromTarget",
+        [robot, cube],
+        preconditions={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnTarget, [cube])},
+        add_effects={LiftedAtom(Holding, [robot, cube])},
+        delete_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnTarget, [cube])},
+    )
+
+    PlaceOnGroundOperator = LiftedOperator(
+        "PlaceOnGround",
+        [robot, cube],
+        preconditions={LiftedAtom(Holding, [robot, cube])},
+        add_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnGround, [cube])},
+        delete_effects={LiftedAtom(Holding, [robot, cube])},
+    )
+
+    PlaceOnTargetOperator = LiftedOperator(
+        "PlaceOnTarget",
+        [robot, cube],
+        preconditions={LiftedAtom(Holding, [robot, cube])},
+        add_effects={LiftedAtom(HandEmpty, [robot]), LiftedAtom(OnTarget, [cube])},
+        delete_effects={LiftedAtom(Holding, [robot, cube])},
+    )
+
+    # Ground controllers
+    class GroundPickController(PickController):
+        """Ground controller for picking cubes."""
+
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> tuple[float, ...]:
+            """Sample parameters for picking - no parameters needed."""
+            return ()
+
+    class GroundPlaceOnGroundController(PlaceController):
+        """Ground controller for placing cubes on ground."""
+
+        def __init__(self, objects: Sequence[Object]) -> None:
+            # Place at a random ground location
+            super().__init__(
+                objects,
+                target_x=1.0,
+                target_y=0.0,
+                target_z=0.02,
+                env=kwargs.get("env"),
+            )
+
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> tuple[float, float, float]:
+            """Sample placement position on ground."""
+            # Sample random ground position
+            target_x = rng.uniform(0.2, 1.8)
+            target_y = rng.uniform(-0.8, 0.8)
+            target_z = 0.02
+            return (target_x, target_y, target_z)
+
+        def reset(self, x: ObjectCentricState, params: tuple[float, ...]) -> None:
+            """Reset with new target position."""
+            if len(params) >= 3:
+                self._target_x, self._target_y, self._target_z = params[:3]
+                self.target_location = np.array(
+                    [self._target_x, self._target_y, self._target_z]
+                )
+            super().reset(x, params)
+
+    class GroundPlaceOnTargetController(PlaceController):
+        """Ground controller for placing cubes on target."""
+
+        def __init__(self, objects: Sequence[Object]) -> None:
+            super().__init__(
+                objects,
+                target_x=1.5,
+                target_y=0.0,
+                target_z=0.02,
+                env=kwargs.get("env"),
+            )
+
+        def sample_parameters(
+            self, x: ObjectCentricState, rng: np.random.Generator
+        ) -> tuple[float, float, float]:
+            """Sample placement position on target."""
+            # Find target locations in the state
+            targets = x.get_objects(target_type)
+            if targets:
+                target = targets[0]  # Use first target
+                target_x = x.get(target, "x")
+                target_y = x.get(target, "y")
+                target_z = x.get(target, "z")
+                # Add small random offset
+                target_x += rng.uniform(-0.05, 0.05)
+                target_y += rng.uniform(-0.05, 0.05)
+                return (target_x, target_y, target_z)
+            else:
+                # Default target position
+                return (1.5, 0.0, 0.02)
+
+        def reset(self, x: ObjectCentricState, params: tuple[float, ...]) -> None:
+            """Reset with new target position."""
+            if len(params) >= 3:
+                self._target_x, self._target_y, self._target_z = params[:3]
+                self.target_location = np.array(
+                    [self._target_x, self._target_y, self._target_z]
+                )
+            super().reset(x, params)
+
+    # Lifted controllers
+    PickController_Lifted: LiftedParameterizedController = (
+        LiftedParameterizedController(
+            [robot, cube],
+            GroundPickController,
+        )
+    )
+
+    PlaceOnGroundController_Lifted: LiftedParameterizedController = (
+        LiftedParameterizedController(
+            [robot, cube],
+            GroundPlaceOnGroundController,
+        )
+    )
+
+    PlaceOnTargetController_Lifted: LiftedParameterizedController = (
+        LiftedParameterizedController(
+            [robot, cube],
+            GroundPlaceOnTargetController,
+        )
+    )
+
+    # Finalize the skills
+    skills = {
+        LiftedSkill(PickFromGroundOperator, PickController_Lifted),
+        LiftedSkill(PickFromTargetOperator, PickController_Lifted),
+        LiftedSkill(PlaceOnGroundOperator, PlaceOnGroundController_Lifted),
+        LiftedSkill(PlaceOnTargetOperator, PlaceOnTargetController_Lifted),
     }
 
-    # Create controllers for different skills
-    controllers = {}
-    
-    # Get the environment from kwargs
-    env = kwargs.get("env")
-    
-    # Pick skill
-    controllers["pick"] = lambda: PickController(
-        objects, 
-        max_skill_horizon=kwargs.get("max_skill_horizon", 100),
-        custom_grasp=kwargs.get("custom_grasp", False),
-        env=env,
+    # Finalize the models
+    return SesameModels(
+        observation_space,
+        state_space,
+        action_space,
+        transition_fn,
+        types,
+        predicates,
+        observation_to_state,
+        state_abstractor,
+        goal_deriver,
+        skills,
     )
-    
-    # Place skill with parameterized target location
-    controllers["place"] = lambda target_x=1.0, target_y=0.0, target_z=0.02: PlaceController(
-        objects,
-        target_x=target_x,
-        target_y=target_y,
-        target_z=target_z,
-        max_skill_horizon=kwargs.get("max_skill_horizon", 100),
-        env=env,
-    )
-    
-    # Create the ground model
-    env = kwargs.get("env")
-    ground_model = (
-        TidybotGroundModel(env, STATE_CONVERTER, robot) if env else None
-    )
-
-    # Create SesameModels structure
-    # Note: This is a simplified version - in practice, you would need to define
-    # the complete abstract model, successor generators, etc.
-    models = SesameModels(
-        abstract_model=None,  # Would need to define abstract state/action spaces
-        abstract_successor_generator=None,  # Would need to define abstract transitions
-        ground_controller_generator=controllers,  # Our skill controllers
-        ground_model=ground_model,  # Pass the ground model
-        ground_successor_generator=None,  # Would need to define ground transitions
-    )
-    
-    return models

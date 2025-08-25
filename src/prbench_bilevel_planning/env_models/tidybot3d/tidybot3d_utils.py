@@ -1,8 +1,8 @@
 """Tidybot 3D utilities for bilevel planning.
 
-This module provides core utilities for implementing tidybot pick-and-place skills
-in a 3D environment using the bilevel planning framework. It includes controllers,
-state management, and skill primitives based on the original tidybot implementation.
+This module provides core utilities for implementing tidybot pick-and-place skills in a
+3D environment using the bilevel planning framework. It includes controllers, state
+management, and skill primitives based on the original tidybot implementation.
 """
 
 import math
@@ -31,6 +31,7 @@ except ImportError:
 
 class PickState(Enum):
     """States of the pick subroutine."""
+
     APPROACH = "approach"
     LOWER = "lower"
     GRASP = "grasp"
@@ -40,6 +41,7 @@ class PickState(Enum):
 
 class PlaceState(Enum):
     """States of the place subroutine."""
+
     APPROACH = "approach"
     LOWER = "lower"
     RELEASE = "release"
@@ -48,15 +50,17 @@ class PlaceState(Enum):
 
 class TidybotController(GroundParameterizedController):
     """Base controller for Tidybot 3D manipulation tasks.
-    
-    This controller provides the foundation for implementing pick-and-place
-    skills using the tidybot's mobile base and manipulator arm.
+
+    This controller provides the foundation for implementing pick-and-place skills using
+    the tidybot's mobile base and manipulator arm.
     """
 
     # Base following parameters
     LOOKAHEAD_DISTANCE = 0.3
     POSITION_TOLERANCE = 0.005
-    GRASP_BASE_TOLERANCE = 0.01  # Increased from 0.002 to 1.0 cm for more practical tolerance
+    GRASP_BASE_TOLERANCE = (
+        0.01  # Increased from 0.002 to 1.0 cm for more practical tolerance
+    )
     PLACE_BASE_TOLERANCE = 0.02
 
     # Object and target locations
@@ -90,7 +94,7 @@ class TidybotController(GroundParameterizedController):
         self._max_skill_horizon = max_skill_horizon
         self._custom_grasp = custom_grasp
         self._env = env  # Store the MuJoCo environment
-        
+
         # Motion planning state
         self.state: str = "idle"  # States: idle, moving, manipulating
         self.current_command: Optional[Dict[str, Any]] = None
@@ -98,32 +102,34 @@ class TidybotController(GroundParameterizedController):
         self.current_waypoint_idx: int = 0
         self.target_ee_pos: Optional[List[float]] = None
         self.grasp_state: Optional[Union[PickState, PlaceState]] = None
-        
+
         # Object and target locations
         self.object_location: Optional[np.ndarray] = None
         self.target_location: Optional[np.ndarray] = None
-        
+
         # Base following parameters
         self.lookahead_position: Optional[List[float]] = None
-        
+
         # Episode control
         self.enabled: bool = True
         self.episode_ended: bool = False
-        
+
         # Initialize IK solver if available
         self.ik_solver: Optional[TidybotIKSolver] = None
         if TidybotIKSolver is not None:
             self.ik_solver = TidybotIKSolver(ee_offset=ee_offset)
-        
+
         # Current plan and parameters
         self._current_plan: List[Dict[str, Any]] = []
         self._current_params: tuple[float, ...] | float = 0.0
         self._current_state: Optional[ObjectCentricState] = None
         self._step_count: int = 0
 
-    def sample_parameters(self, rng: Optional[np.random.Generator] = None) -> Union[tuple[float, ...], float]:
+    def sample_parameters(
+        self, rng: Optional[np.random.Generator] = None
+    ) -> Union[tuple[float, ...], float]:
         """Return default parameters for this controller.
-        
+
         This satisfies the abstract method requirement from the base interface.
         """
         return 0.0
@@ -134,7 +140,7 @@ class TidybotController(GroundParameterizedController):
         self._current_plan = []
         self._current_state = x
         self._step_count = 0
-        
+
         # Reset motion planning state
         self.state = "idle"
         self.current_command = None
@@ -144,35 +150,32 @@ class TidybotController(GroundParameterizedController):
         self.lookahead_position = None
         self.episode_ended = False
         self.grasp_state = None
-        
+
         # Reset object and target locations
         self.object_location = None
         self.target_location = None
-        
+
         # Enable policy execution
         self.enabled = True
 
     def terminated(self) -> bool:
         """Check if the skill execution is terminated."""
-        return (
-            self.episode_ended or 
-            self._step_count >= self._max_skill_horizon
-        )
+        return self.episode_ended or self._step_count >= self._max_skill_horizon
 
     def step(self) -> Dict[str, Any]:
         """Execute one step of the controller."""
         assert self._current_state is not None
         self._step_count += 1
-        
+
         if self.terminated():
             return self._create_hold_action()
-        
+
         if len(self._current_plan) == 0:
             self._current_plan = self._generate_plan(self._current_state)
-        
+
         if len(self._current_plan) > 0:
             return self._current_plan.pop(0)
-        
+
         return self._create_hold_action()
 
     def observe(self, x: ObjectCentricState) -> None:
@@ -181,7 +184,7 @@ class TidybotController(GroundParameterizedController):
 
     def _generate_plan(self, state: ObjectCentricState) -> List[Dict[str, Any]]:
         """Generate a plan based on the current state.
-        
+
         This method should be overridden by specific skill implementations.
         """
         return []
@@ -198,15 +201,17 @@ class TidybotController(GroundParameterizedController):
     def detect_objects_from_mujoco(self) -> List[np.ndarray]:
         """Detect objects directly from the MuJoCo simulation."""
         detected_objects: List[np.ndarray] = []
-        
+
         if self._env is None:
-            print("Warning: No MuJoCo environment available, falling back to obs detection")
+            print(
+                "Warning: No MuJoCo environment available, falling back to obs detection"
+            )
             return detected_objects
-        
+
         try:
             # Get the current observation from MuJoCo environment
             obs = self._env.get_obs()
-            
+
             cubes: List[Tuple[np.ndarray, str]] = []
             for key in obs:
                 if key.endswith("_pos") and "cube" in key:
@@ -227,7 +232,7 @@ class TidybotController(GroundParameterizedController):
                 detected_objects.append(target_cube_pos)
         except Exception as e:
             print(f"Error detecting objects from MuJoCo: {e}")
-        
+
         return detected_objects
 
     def detect_objects_from_obs(self, obs: Dict[str, Any]) -> List[np.ndarray]:
@@ -235,7 +240,7 @@ class TidybotController(GroundParameterizedController):
         # First try to get from MuJoCo environment directly
         if self._env is not None:
             return self.detect_objects_from_mujoco()
-        
+
         # Fallback to observation dictionary
         detected_objects: List[np.ndarray] = []
         cubes: List[Tuple[np.ndarray, str]] = []
@@ -244,7 +249,7 @@ class TidybotController(GroundParameterizedController):
                 cube_pos = obs[key]
                 cube_name = key.replace("_pos", "")
                 cubes.append((cube_pos, cube_name))
-        
+
         if cubes:
             if self._custom_grasp:
                 cubes.sort(key=lambda x: x[0][1])  # Sort by y
@@ -255,7 +260,7 @@ class TidybotController(GroundParameterizedController):
                 f"Selected target object '{target_cube_name}' at pose: {target_cube_pos}"
             )
             detected_objects.append(target_cube_pos)
-        
+
         return detected_objects
 
     def distance(
@@ -306,7 +311,12 @@ class TidybotController(GroundParameterizedController):
     def build_base_command(self, command: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Build base command using waypoint planning logic."""
         assert command["primitive_name"] in {
-            "move", "pick", "place", "toss", "shelf", "drawer"
+            "move",
+            "pick",
+            "place",
+            "toss",
+            "shelf",
+            "drawer",
         }
 
         # Base movement only
@@ -316,7 +326,7 @@ class TidybotController(GroundParameterizedController):
                 "target_ee_pos": None,
                 "position_tolerance": 0.1,
             }
-        
+
         target_ee_pos = command["waypoints"][-1]
         end_effector_offset = self.get_end_effector_offset()
         new_waypoint = None
@@ -358,31 +368,31 @@ class TidybotController(GroundParameterizedController):
 
 class TidybotStateConverter:
     """Utility class to convert between ObjectCentricState and tidybot observations."""
-    
+
     @staticmethod
     def state_to_obs(state: ObjectCentricState, robot: Object) -> Dict[str, Any]:
         """Convert ObjectCentricState to tidybot observation format."""
         obs = {}
-        
+
         # Robot base pose
         base_x = state.get(robot, "x")
         base_y = state.get(robot, "y")
         base_theta = state.get(robot, "theta")
         obs["base_pose"] = np.array([base_x, base_y, base_theta])
-        
+
         # Robot arm position and orientation
         arm_x = state.get(robot, "arm_x")
         arm_y = state.get(robot, "arm_y")
         arm_z = state.get(robot, "arm_z")
         obs["arm_pos"] = np.array([arm_x, arm_y, arm_z])
-        
+
         # Robot arm quaternion (default to gripper pointing down)
         obs["arm_quat"] = np.array([1.0, 0.0, 0.0, 0.0])
-        
+
         # Gripper position (0.0 = open, 1.0 = closed)
         gripper_pos = state.get(robot, "gripper")
         obs["gripper_pos"] = np.array([gripper_pos])
-        
+
         # Add object positions
         for obj in state.data.keys():
             if "cube" in obj.name.lower():
@@ -390,17 +400,19 @@ class TidybotStateConverter:
                 obj_y = state.get(obj, "y")
                 obj_z = state.get(obj, "z")
                 obs[f"{obj.name}_pos"] = np.array([obj_x, obj_y, obj_z])
-                
+
                 # Default quaternion for objects
                 obs[f"{obj.name}_quat"] = np.array([0.0, 0.0, 0.0, 1.0])
-        
+
         return obs
-    
+
     @staticmethod
-    def obs_to_state_update(obs: Dict[str, Any], robot: Object) -> Dict[Object, Dict[str, float]]:
+    def obs_to_state_update(
+        obs: Dict[str, Any], robot: Object
+    ) -> Dict[Object, Dict[str, float]]:
         """Convert tidybot observation to state updates."""
         updates = {}
-        
+
         # Update robot state
         robot_updates = {}
         if "base_pose" in obs:
@@ -408,19 +420,19 @@ class TidybotStateConverter:
             robot_updates["x"] = float(base_pose[0])
             robot_updates["y"] = float(base_pose[1])
             robot_updates["theta"] = float(base_pose[2])
-        
+
         if "arm_pos" in obs:
             arm_pos = obs["arm_pos"]
             robot_updates["arm_x"] = float(arm_pos[0])
             robot_updates["arm_y"] = float(arm_pos[1])
             robot_updates["arm_z"] = float(arm_pos[2])
-        
+
         if "gripper_pos" in obs:
             gripper_pos = obs["gripper_pos"]
             robot_updates["gripper"] = float(gripper_pos[0])
-        
+
         updates[robot] = robot_updates
-        
+
         return updates
 
 
@@ -432,25 +444,25 @@ def create_tidybot_action(
 ) -> Dict[str, Any]:
     """Create a tidybot action dictionary with default values."""
     action = {}
-    
+
     if base_pose is not None:
         action["base_pose"] = base_pose
     else:
         action["base_pose"] = np.array([0.0, 0.0, 0.0])
-    
+
     if arm_pos is not None:
         action["arm_pos"] = arm_pos
     else:
         action["arm_pos"] = np.array([0.14, 0.0, 0.21])
-    
+
     if arm_quat is not None:
         action["arm_quat"] = arm_quat
     else:
         action["arm_quat"] = np.array([1.0, 0.0, 0.0, 0.0])
-    
+
     if gripper_pos is not None:
         action["gripper_pos"] = gripper_pos
     else:
         action["gripper_pos"] = np.array([0.0])
-    
+
     return action
