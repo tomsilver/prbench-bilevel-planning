@@ -13,19 +13,6 @@ from bilevel_planning.structs import (
 from bilevel_planning.trajectory_samplers.trajectory_sampler import (
     TrajectorySamplingFailure,
 )
-from geom2drobotenvs.concepts import is_inside_shelf
-from geom2drobotenvs.object_types import CRVRobotType
-from geom2drobotenvs.structs import (
-    SE2Pose,
-)
-from geom2drobotenvs.utils import (
-    CRVRobotActionSpace,
-    get_suctioned_objects,
-    get_tool_tip_position,
-    run_motion_planning_for_crv_robot,
-    snap_suctioned_objects,
-    state_has_collision,
-)
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
 from prbench.envs.geom2d.clutteredstorage2d import (
@@ -33,6 +20,19 @@ from prbench.envs.geom2d.clutteredstorage2d import (
     ObjectCentricClutteredStorage2DEnv,
     ShelfType,
     TargetBlockType,
+)
+from prbench.envs.geom2d.object_types import CRVRobotType
+from prbench.envs.geom2d.structs import (
+    SE2Pose,
+)
+from prbench.envs.geom2d.utils import (
+    CRVRobotActionSpace,
+    get_suctioned_objects,
+    get_tool_tip_position,
+    is_inside_shelf,
+    run_motion_planning_for_crv_robot,
+    snap_suctioned_objects,
+    state_has_collision,
 )
 from relational_structs import (
     GroundAtom,

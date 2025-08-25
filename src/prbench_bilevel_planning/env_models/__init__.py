@@ -8,11 +8,11 @@ from typing import Sequence
 
 import numpy as np
 from bilevel_planning.structs import GroundParameterizedController, SesameModels
-from geom2drobotenvs.object_types import CRVRobotType
-from geom2drobotenvs.structs import SE2Pose
-from geom2drobotenvs.utils import CRVRobotActionSpace
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
+from prbench.envs.geom2d.object_types import CRVRobotType
+from prbench.envs.geom2d.structs import SE2Pose
+from prbench.envs.geom2d.utils import CRVRobotActionSpace
 from relational_structs import Object, ObjectCentricState
 
 
