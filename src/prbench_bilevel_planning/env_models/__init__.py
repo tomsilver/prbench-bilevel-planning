@@ -141,7 +141,8 @@ def create_bilevel_planning_models(
 
     if env_path is None:
         raise FileNotFoundError(
-            f"No model file found for environment '{env_name}' in any of: {possible_paths}"
+            f"No model file found for environment '{env_name}' in any of: "
+            f"{possible_paths}"
         )
 
     module_name = f"{env_name}_module"

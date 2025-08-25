@@ -4,10 +4,28 @@ These tests use the ArmController and its dependencies, assuming all required pa
 are installed.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 
-from prbench_bilevel_planning.env_models.tidybot3d.arm_controller import ArmController
+# Try to import ArmController, skip tests if MuJoCo isn't available
+skip_reason = ""
+try:
+    from prbench_bilevel_planning.env_models.tidybot3d.arm_controller import (
+        ArmController,
+    )
+
+    MUJOCO_AVAILABLE = True
+except (ImportError, AttributeError) as e:
+    MUJOCO_AVAILABLE = False
+    skip_reason = f"MuJoCo/OpenGL not available: {e}"
+    if TYPE_CHECKING:
+        from prbench_bilevel_planning.env_models.tidybot3d.arm_controller import (
+            ArmController,
+        )
 
 # pylint: disable=redefined-outer-name
 
@@ -16,6 +34,8 @@ from prbench_bilevel_planning.env_models.tidybot3d.arm_controller import ArmCont
 def arm_controller() -> ArmController:
     """Fixture to create an ArmController instance with real dependencies for
     testing."""
+    if not MUJOCO_AVAILABLE:
+        pytest.skip(skip_reason)
     qpos = np.zeros(7)
     qvel = np.zeros(7)
     ctrl = np.zeros(7)
@@ -25,6 +45,7 @@ def arm_controller() -> ArmController:
     return ArmController(qpos, qvel, ctrl, qpos_gripper, ctrl_gripper, timestep)
 
 
+@pytest.mark.skipif(not MUJOCO_AVAILABLE, reason=skip_reason)
 def test_reset(arm_controller):
     """Test that ArmController.reset() sets state to retract configuration and OTG to
     Finished."""
@@ -41,6 +62,7 @@ def test_reset(arm_controller):
     assert arm_controller.otg_res is not None
 
 
+@pytest.mark.skipif(not MUJOCO_AVAILABLE, reason=skip_reason)
 def test_control_callback_sets_target(arm_controller):
     """Test that control_callback sets the target position using real TidybotIKSolver
     and updates OTG state."""
