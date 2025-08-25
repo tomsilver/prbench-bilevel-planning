@@ -17,16 +17,14 @@ from relational_structs import Object, ObjectCentricState
 
 # Import tidybot components
 try:
-    from prbench.envs.tidybot.arm_controller import ArmController
-    from prbench.envs.tidybot.base_controller import BaseController
-    from prbench.envs.tidybot.ik_solver import TidybotIKSolver
-    from prbench.envs.tidybot.tidybot_mujoco_env import MujocoEnv
+    from .arm_controller import ArmController
+    from .base_controller import BaseController
+    from .ik_solver import TidybotIKSolver
 except ImportError:
     # Fallback for when tidybot components are not available
     ArmController = None
     BaseController = None
     TidybotIKSolver = None
-    MujocoEnv = None
 
 
 class PickState(Enum):

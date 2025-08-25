@@ -6,6 +6,8 @@ the bilevel planning framework, integrating with the tidybot MuJoCo environment 
 controllers.
 """
 
+import os
+import sys
 import time
 from typing import Any, Dict, Optional
 
@@ -77,12 +79,21 @@ class TidybotBilevelDemo:
         """Set up the MuJoCo environment."""
         print("Setting up MuJoCo environment...")
         try:
-            self.env = MujocoEnv(
-                render_images=True,
-                show_viewer=self.show_viewer,
-                table_scene=False,  # Use ground scene
-                cupboard_scene=False,
-            )
+            # Detect headless mode (no DISPLAY) and set OSMesa if needed
+            if not os.environ.get("DISPLAY"):
+                self.env = MujocoEnv(
+                    render_images=False,
+                    show_viewer=False,
+                    table_scene=False,  # Use ground scene
+                    cupboard_scene=False,
+                )
+            else:
+                self.env = MujocoEnv(
+                    render_images=True,
+                    show_viewer=self.show_viewer,
+                    table_scene=False,  # Use ground scene
+                    cupboard_scene=False,
+                )
 
             print("MuJoCo environment setup complete")
         except Exception as e:
