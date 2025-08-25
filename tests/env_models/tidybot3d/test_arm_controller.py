@@ -16,7 +16,6 @@ from prbench_bilevel_planning.env_models.tidybot3d.arm_controller import ArmCont
 def arm_controller() -> ArmController:
     """Fixture to create an ArmController instance with real dependencies for
     testing."""
-    
     qpos = np.zeros(7)
     qvel = np.zeros(7)
     ctrl = np.zeros(7)

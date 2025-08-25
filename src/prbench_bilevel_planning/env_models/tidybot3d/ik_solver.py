@@ -40,8 +40,20 @@ class TidybotIKSolver:
         # Path to the gen3.xml file in the third-party prbench directory
         current_dir = os.path.dirname(__file__)
         model_path = os.path.join(
-            current_dir, "..", "..", "..", "..", "third-party", "prbench", 
-            "src", "prbench", "envs", "tidybot", "models", "kinova_gen3", "gen3.xml"
+            current_dir,
+            "..",
+            "..",
+            "..",
+            "..",
+            "third-party",
+            "prbench",
+            "src",
+            "prbench",
+            "envs",
+            "tidybot",
+            "models",
+            "kinova_gen3",
+            "gen3.xml",
         )
         model_path = os.path.abspath(model_path)  # Resolve to absolute path
         self.model = mujoco.MjModel.from_xml_path(  # pylint: disable=no-member
