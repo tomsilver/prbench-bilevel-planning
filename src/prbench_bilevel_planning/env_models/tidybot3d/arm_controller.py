@@ -121,10 +121,10 @@ class ArmController:
         """Process control commands and update arm trajectory."""
         if command is not None:
             self.last_command_time = time.time()
-            if "arm_pos" in command:
+            if "hand_pos" in command:
                 # Run inverse kinematics on new target pose
                 qpos = self.ik_solver.solve(
-                    command["arm_pos"], command["arm_quat"], self.qpos
+                    command["hand_pos"], command["hand_quat"], self.qpos
                 )
                 qpos = (
                     self.qpos + np.mod((qpos - self.qpos) + np.pi, 2 * np.pi) - np.pi
