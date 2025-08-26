@@ -68,8 +68,8 @@ def test_control_callback_sets_target(arm_controller):
     and updates OTG state."""
     arm_controller.reset()
     command = {
-        "arm_pos": np.array([1.0, 2.0, 3.0]),
-        "arm_quat": np.array([0.0, 0.0, 0.0, 1.0]),
+        "hand_pos": np.array([1.0, 2.0, 3.0]),
+        "hand_quat": np.array([0.0, 0.0, 0.0, 1.0]),
     }
     arm_controller.control_callback(command)
     # The target position should be set, but the exact value depends on TidybotIKSolver
