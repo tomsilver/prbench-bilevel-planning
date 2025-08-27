@@ -1,8 +1,5 @@
-"""Integration tests for the ArmController class in prbench.envs.tidybot.arm_controller.
-
-These tests use the ArmController and its dependencies, assuming all required packages
-are installed.
-"""
+"""Integration tests for the ArmController class in
+prbench.envs.tidybot.arm_controller."""
 
 from __future__ import annotations
 

@@ -1,9 +1,5 @@
 """Integration tests for the BaseController class in
-prbench.envs.tidybot.base_controller.
-
-These tests use the BaseController and its dependencies, assuming all required packages
-are installed.
-"""
+prbench.envs.tidybot.base_controller."""
 
 # pylint: disable=redefined-outer-name
 

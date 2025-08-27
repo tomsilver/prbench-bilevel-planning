@@ -4,8 +4,6 @@ This module defines the ArmController class, which provides control logic for th
 robotic arm using inverse kinematics and online trajectory generation (Ruckig). It is
 designed to be used within the TidyBot simulation and control framework, and supports
 smooth, constrained motion for the arm and gripper.
-
-The current controller is part of the environment.
 """
 
 import math
