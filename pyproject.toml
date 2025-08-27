@@ -59,6 +59,10 @@ exclude = ["venv/*", ".venv/*", "third-party/*"]
 [[tool.mypy.overrides]]
 module = [
     "matplotlib.*",
+    "mujoco",
+    "mujoco.*",
+    "ruckig",
+    "ruckig.*",
 ]
 ignore_missing_imports = true
 
