@@ -1,6 +1,6 @@
 [submodule "third-party/bilevel-planning"]
 	path = third-party/bilevel-planning
 	url = https://github.com/tomsilver/bilevel-planning
-[submodule "third-party/prbench"]
-	path = third-party/prbench
-	url = https://github.com/Princeton-Robot-Planning-and-Learning/prbench
+[submodule "third-party/prbench-models"]
+	path = third-party/prbench-models
+	url = https://github.com/Princeton-Robot-Planning-and-Learning/prbench-models.git
