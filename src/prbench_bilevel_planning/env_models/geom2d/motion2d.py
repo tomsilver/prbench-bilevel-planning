@@ -28,6 +28,9 @@ from prbench.envs.geom2d.utils import (
     run_motion_planning_for_crv_robot,
     state_has_collision,
 )
+from prbench_models.geom2d.utils import (
+    Geom2dRobotController,
+)
 from relational_structs import (
     GroundAtom,
     LiftedAtom,
@@ -38,10 +41,6 @@ from relational_structs import (
     Variable,
 )
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
-
-from prbench_bilevel_planning.env_models.geom2d.geom2d_utils import (
-    Geom2dRobotController,
-)
 
 
 def create_bilevel_planning_models(
