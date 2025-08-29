@@ -23,6 +23,9 @@ from prbench.envs.geom2d.utils import (
     get_suctioned_objects,
     object_to_multibody2d,
 )
+from prbench_models.geom2d.utils import (
+    Geom2dRobotController,
+)
 from relational_structs import (
     GroundAtom,
     LiftedAtom,
@@ -34,10 +37,6 @@ from relational_structs import (
 )
 from relational_structs.spaces import ObjectCentricBoxSpace, ObjectCentricStateSpace
 from tomsgeoms2d.structs import Geom2D
-
-from prbench_bilevel_planning.env_models.geom2d.geom2d_utils import (
-    Geom2dRobotController,
-)
 
 
 def create_bilevel_planning_models(

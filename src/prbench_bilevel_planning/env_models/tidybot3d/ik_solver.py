@@ -20,6 +20,7 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
+import prbench
 
 
 class TidybotIKSolver:
@@ -37,13 +38,10 @@ class TidybotIKSolver:
         max_angle_change: float = np.deg2rad(45),
     ) -> None:
         # Load arm without gripper
-        # Path to the gen3.xml file in the third-party prbench directory
-        current_dir = Path(__file__)
+        # Find the prbench installation path, then append prbench/...
+        prbench_path = Path(prbench.__file__).parent.parent
         model_path = (
-            current_dir.parents[4]
-            / "third-party"
-            / "prbench"
-            / "src"
+            prbench_path
             / "prbench"
             / "envs"
             / "tidybot"

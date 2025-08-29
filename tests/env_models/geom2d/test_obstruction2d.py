@@ -5,12 +5,12 @@ import prbench
 import pytest
 from conftest import MAKE_VIDEOS
 from gymnasium.wrappers import RecordVideo
+from prbench_models.geom2d.envs.obstruction2d.parameterized_skills import (
+    get_robot_transfer_position,
+)
 
 from prbench_bilevel_planning.agent import BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
-from prbench_bilevel_planning.env_models.geom2d.obstruction2d import (
-    get_robot_transfer_position,
-)
 
 prbench.register_all_environments()
 
