@@ -1,20 +1,10 @@
 """Tests for the TidyBot3D inverse kinematics solver (IKSolver)."""
 
 import numpy as np
-import pytest
 
-# Try to import TidybotIKSolver, skip tests if MuJoCo isn't available
-skip_reason = ""
-try:
-    from prbench_bilevel_planning.env_models.tidybot3d.ik_solver import TidybotIKSolver
-
-    MUJOCO_AVAILABLE = True
-except (ImportError, AttributeError) as e:
-    MUJOCO_AVAILABLE = False
-    skip_reason = f"MuJoCo/OpenGL not available: {e}"
+from prbench_bilevel_planning.env_models.tidybot3d.ik_solver import TidybotIKSolver
 
 
-@pytest.mark.skipif(not MUJOCO_AVAILABLE, reason=skip_reason)
 def test_ik_solver_basic():
     """Test that the TidybotIKSolver returns a valid joint configuration for a simple
     target pose."""
@@ -27,7 +17,6 @@ def test_ik_solver_basic():
     assert np.all(np.isfinite(result_qpos))
 
 
-@pytest.mark.skipif(not MUJOCO_AVAILABLE, reason=skip_reason)
 def test_ik_solver_performance_and_accuracy():
     """Test the performance and accuracy of the TidybotIKSolver for a known home pose
     over 1000 iterations."""
