@@ -207,68 +207,48 @@ class TidybotController(GroundParameterizedController):
             return detected_objects
 
         try:
-            # Get the current observation from MuJoCo environment
-            obs = self._env.get_obs()
-
-            # Extract object poses from qpos by skipping robot's DOFs using model joint addresses.
-            # Robot: base (3 DOFs) + arm (7 DOFs). Each free object uses 7 DOFs (pos(3)+quat(4)).
-            if "qpos" not in obs or not hasattr(self._env, "sim") or self._env.sim is None:
+            # Require a live sim
+            if not hasattr(self._env, "sim") or self._env.sim is None:
                 return detected_objects
 
-            qpos: NDArray[np.float64] = obs["qpos"]
-
-            # Determine start index for objects using joint qpos addresses
             model = self._env.sim.model
-            base_joint_names = ["joint_x", "joint_y", "joint_th"]
-            arm_joint_names = [
-                "joint_1",
-                "joint_2",
-                "joint_3",
-                "joint_4",
-                "joint_5",
-                "joint_6",
-                "joint_7",
-            ]
+            data = self._env.sim.data
 
-            base_qpos_indices: list[int] = []
-            arm_qpos_indices: list[int] = []
+            # Collect positions of bodies whose names start with "cube"
+            cube_world_positions: List[np.ndarray] = []
             try:
-                for name in base_joint_names:
-                    base_qpos_indices.append(model.get_joint_qpos_addr(name))
-                for name in arm_joint_names:
-                    arm_qpos_indices.append(model.get_joint_qpos_addr(name))
+                # model.body_names is a tuple of names aligned with body IDs
+                for body_id, body_name in enumerate(model.body_names):
+                    if body_name is None:
+                        continue
+                    if body_name.lower().startswith("cube"):
+                        # data.xpos gives world position of body frame origin
+                        pos = np.array(data.xpos[body_id], dtype=float)
+                        if pos.shape[0] >= 3 and np.all(np.isfinite(pos)):
+                            cube_world_positions.append(pos[:3].copy())
             except Exception:
-                # Fallback: assume base at 0..2 and arm next 7
-                base_qpos_indices = [0, 1, 2]
-                arm_qpos_indices = list(range(3, 10))
+                # Fallback: attempt direct lookup for common cube names
+                for name in ("cube1", "cube2", "cube3"):
+                    try:
+                        body_id = model._body_name2id.get(name)  # type: ignore[attr-defined]
+                        if body_id is None:
+                            continue
+                        pos = np.array(data.xpos[body_id], dtype=float)
+                        if pos.shape[0] >= 3 and np.all(np.isfinite(pos)):
+                            cube_world_positions.append(pos[:3].copy())
+                    except Exception:
+                        continue
 
-            # Objects precede robot joints in qpos for current scenes; extract objects
-            # from the beginning up to the first robot qpos index in 7-DoF chunks.
-            robot_min_idx = min(
-                [min(base_qpos_indices)] if base_qpos_indices else [qpos.size]
-                + [min(arm_qpos_indices)] if arm_qpos_indices else [qpos.size]
-            )
-            if robot_min_idx <= 0:
+            if not cube_world_positions:
                 return detected_objects
 
-            object_positions: List[np.ndarray] = []
-            i = 0
-            while i + 6 < robot_min_idx:
-                pos = qpos[i : i + 3]
-                if np.all(np.isfinite(pos)):
-                    object_positions.append(pos.copy())
-                i += 7
-
-            if not object_positions:
-                return detected_objects
-
-            # Choose target object deterministically: sort by x or y depending on custom_grasp
+            # Choose target object deterministically: by x or y depending on custom_grasp
             if self._custom_grasp:
-                object_positions.sort(key=lambda p: p[1])  # by y
+                cube_world_positions.sort(key=lambda p: p[1])  # by y
             else:
-                object_positions.sort(key=lambda p: p[0])  # by x
+                cube_world_positions.sort(key=lambda p: p[0])  # by x
 
-            detected_objects.append(object_positions[0])
+            detected_objects.append(cube_world_positions[0])
         except Exception as e:
             print(f"Error detecting objects from MuJoCo: {e}")
 

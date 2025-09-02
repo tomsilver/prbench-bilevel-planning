@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 import cv2 as cv
 import numpy as np
 from numpy.typing import NDArray
+import mujoco
 
 # Import bilevel planning components
 try:
@@ -42,6 +43,7 @@ from prbench_bilevel_planning.env_models.tidybot3d.ground import (
     TidybotStateConverter,
     create_tidybot_action,
 )
+from prbench_bilevel_planning.env_models.tidybot3d.tidybot3d_utils import TidybotController
 
 
 class TidybotBilevelDemo:
@@ -139,13 +141,13 @@ class TidybotBilevelDemo:
         from pathlib import Path
         
         # Get the path to the ground scene XML
-        xml_path = Path(__file__).parent.parent.parent.parent / "third-party" / "prbench" / "src" / "prbench" / "envs" / "tidybot" / "models" / "stanford_tidybot" / "ground_scene.xml"
+        xml_path = Path(__file__).parent.parent.parent.parent / "third-party" / "prbench-models" / "third-party" / "prbench" / "src" / "prbench" / "envs" / "tidybot" / "models" / "stanford_tidybot" / "ground_scene.xml"
         
         if xml_path.exists():
             return str(xml_path)
         
         # Fallback: try to find it relative to the current working directory
-        fallback_path = "prbench-bilevel-planning/third-party/prbench/src/prbench/envs/tidybot/models/stanford_tidybot/ground_scene.xml"
+        fallback_path = "prbench-bilevel-planning/third-party/prbench-models/third-party/prbench/src/prbench/envs/tidybot/models/stanford_tidybot/ground_scene.xml"
         if os.path.exists(fallback_path):
             return fallback_path
         
@@ -344,6 +346,7 @@ class TidybotBilevelDemo:
 
         # Prefer accurate slices provided by the environment
         try:
+            # Base pose from dedicated slice or qpos
             if hasattr(self.env, "qpos_base") and self.env.qpos_base is not None:
                 base_slice = self.env.qpos_base
                 robot_updates.update({
@@ -358,36 +361,130 @@ class TidybotBilevelDemo:
                     "theta": float(obs["qpos"][2]),
                 })
 
-            if hasattr(self.env, "qpos_arm") and self.env.qpos_arm is not None:
-                arm_slice = self.env.qpos_arm
-                if len(arm_slice) >= 3:
-                    robot_updates.update({
-                        "arm_x": float(arm_slice[0]),
-                        "arm_y": float(arm_slice[1]),
-                        "arm_z": float(arm_slice[2]),
-                    })
-            elif "qpos" in obs and len(obs["qpos"]) >= 10:
-                arm_pos = obs["qpos"][3:10]
-                if len(arm_pos) >= 3:
-                    robot_updates.update({
-                        "arm_x": float(arm_pos[0]),
-                        "arm_y": float(arm_pos[1]),
-                        "arm_z": float(arm_pos[2]),
-                    })
+            # End-effector pose from simulation (site preferred, else body)
+            ee_pos = None
+            ee_quat_xyzw = None
+            if hasattr(self.env, "sim") and self.env.sim is not None:
+                model = self.env.sim.model
+                data = self.env.sim.data
+                # Try site id cached on env
+                sid = getattr(self.env, "ee_site_id", None)
+                if sid is not None:
+                    ee_pos = np.array(data.site_xpos[sid], dtype=float)
+                    xmat = np.array(data.site_xmat[sid], dtype=float)
+                    quat_wxyz = np.empty(4, dtype=float)
+                    mujoco.mju_mat2Quat(quat_wxyz, xmat)
+                    ee_quat_xyzw = np.array([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]], dtype=float)
+                else:
+                    # Fallback: check by site name
+                    site_id = None
+                    try:
+                        site_id = model._site_name2id.get("pinch_site")  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    if site_id is None:
+                        # iterate site names
+                        for i, nm in enumerate(model.site_names):
+                            if nm is not None and nm == "pinch_site":
+                                site_id = i
+                                break
+                    if site_id is not None:
+                        ee_pos = np.array(data.site_xpos[site_id], dtype=float)
+                        xmat = np.array(data.site_xmat[site_id], dtype=float)
+                        quat_wxyz = np.empty(4, dtype=float)
+                        mujoco.mju_mat2Quat(quat_wxyz, xmat)
+                        ee_quat_xyzw = np.array([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]], dtype=float)
+                    else:
+                        # Fallback: use tool_frame body if present
+                        bid = getattr(self.env, "ee_body_id", None)
+                        if bid is None:
+                            try:
+                                bid = model._body_name2id.get("tool_frame")  # type: ignore[attr-defined]
+                            except Exception:
+                                bid = None
+                        if bid is not None:
+                            ee_pos = np.array(data.xpos[bid], dtype=float)
+                            xmat = np.array(data.xmat[bid], dtype=float)
+                            quat_wxyz = np.empty(4, dtype=float)
+                            mujoco.mju_mat2Quat(quat_wxyz, xmat)
+                            ee_quat_xyzw = np.array([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]], dtype=float)
 
-            # Gripper: use control signal if qpos not available
+            if ee_pos is not None:
+                # Convert EE pose from world to base frame (arm commands are base-framed)
+                base_x = robot_updates.get("x", 0.0)
+                base_y = robot_updates.get("y", 0.0)
+                base_theta = robot_updates.get("theta", 0.0)
+
+                # Position: translate by base (x,y), rotate by -theta about z
+                dx = ee_pos[0] - float(base_x)
+                dy = ee_pos[1] - float(base_y)
+                ct = np.cos(-base_theta)
+                st = np.sin(-base_theta)
+                px = ct * dx - st * dy
+                py = st * dx + ct * dy
+                # Z: offset by robot base height so z=0 is base frame
+                pz = float(ee_pos[2]) - float(getattr(TidybotController, "ROBOT_BASE_HEIGHT", 0.0))
+
+                robot_updates.update({
+                    "arm_x": float(px),
+                    "arm_y": float(py),
+                    "arm_z": float(pz),
+                })
+
+                # Orientation: q_base = qz(-theta) ⊗ q_world
+                if ee_quat_xyzw is not None:
+                    half = -base_theta * 0.5
+                    qz = np.array([0.0, 0.0, np.sin(half), np.cos(half)], dtype=float)  # XYZW
+                    # Quaternion multiplication (a⊗b) in XYZW
+                    ax, ay, az, aw = qz
+                    bx, by, bz, bw = ee_quat_xyzw
+                    qx = aw * bx + ax * bw + ay * bz - az * by
+                    qy = aw * by - ax * bz + ay * bw + az * bx
+                    qzq = aw * bz + ax * by - ay * bx + az * bw
+                    qw = aw * bw - ax * bx - ay * by - az * bz
+                    try:
+                        self.current_arm_quat = np.array([qx, qy, qzq, qw], dtype=float)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+            else:
+                # Last resort: do not infer EE pos from joint angles; skip update
+                pass
+
+            # Gripper: use control signal if available, else skip
             if hasattr(self.env, "ctrl_gripper") and self.env.ctrl_gripper is not None:
                 robot_updates["gripper"] = float(self.env.ctrl_gripper[0])
-            elif "qpos" in obs and len(obs["qpos"]) >= 11:
-                robot_updates["gripper"] = float(obs["qpos"][10])
         except Exception:
             # Fallback: do nothing if extraction fails
             pass
 
         # Update cube positions - look for object positions in observation
         cube_updates = {}
-        # This depends on how objects are represented in the new observation format
-        # For now, we'll use a placeholder since the exact format may vary
+        try:
+            if hasattr(self.env, "sim") and self.env.sim is not None:
+                model = self.env.sim.model
+                data = self.env.sim.data
+                # Iterate over bodies named like cubes and pick one that matches our self.cube if present
+                for body_id, body_name in enumerate(model.body_names):
+                    if body_name is None:
+                        continue
+                    if body_name.lower().startswith("cube"):
+                        pos = np.array(data.xpos[body_id], dtype=float)
+                        if pos.shape[0] >= 3 and np.all(np.isfinite(pos)):
+                            if self.cube is not None and body_name == self.cube.name:
+                                cube_updates = {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])}
+                                break
+                # If named cube not found, default to the first cube
+                if not cube_updates:
+                    for body_id, body_name in enumerate(model.body_names):
+                        if body_name is None:
+                            continue
+                        if body_name.lower().startswith("cube"):
+                            pos = np.array(data.xpos[body_id], dtype=float)
+                            if pos.shape[0] >= 3 and np.all(np.isfinite(pos)):
+                                cube_updates = {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])}
+                                break
+        except Exception:
+            pass
         
         # Rebuild the state with updated values
         new_state_dict = self._state_as_dict()
