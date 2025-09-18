@@ -101,7 +101,7 @@ def create_bilevel_planning_models(
         else:
             atoms.add(GroundAtom(HandEmpty, [robot]))
 
-        # Get button colors from Config
+        # Get button colors from spec
         config = StickButton2DEnvConfig()
 
         # Add button status atoms based on color.
