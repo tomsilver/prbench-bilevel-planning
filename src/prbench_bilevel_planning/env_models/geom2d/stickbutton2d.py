@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 from prbench.envs.geom2d.object_types import CircleType, CRVRobotType, RectangleType
 from prbench.envs.geom2d.stickbutton2d import (
     ObjectCentricStickButton2DEnv,
-    StickButton2DEnvSpec,
+    StickButton2DEnvConfig,
 )
 from prbench.envs.geom2d.utils import (
     CRVRobotActionSpace,
@@ -101,8 +101,8 @@ def create_bilevel_planning_models(
         else:
             atoms.add(GroundAtom(HandEmpty, [robot]))
 
-        # Get button colors from spec
-        spec = StickButton2DEnvSpec()
+        # Get button colors from Config
+        config = StickButton2DEnvConfig()
 
         # Add button status atoms based on color.
         for button in buttons:
@@ -111,7 +111,7 @@ def create_bilevel_planning_models(
                 x.get(button, "color_g"),
                 x.get(button, "color_b"),
             )
-            if np.allclose(button_color, spec.button_pressed_rgb, atol=1e-3):
+            if np.allclose(button_color, config.button_pressed_rgb, atol=1e-3):
                 atoms.add(GroundAtom(Pressed, [button]))
 
         # Add spatial relationship atoms using geometry
