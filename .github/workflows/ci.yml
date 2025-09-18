@@ -35,7 +35,7 @@ jobs:
         uv sync --all-extras --dev
         uv pip install third-party/bilevel-planning
         uv pip install third-party/prbench-models
-        uv pip install third-party/prbench-models/third-party/prbench
+        uv pip install third-party/prbench-models/third-party/prbench[geom2d]
     - name: Lint
       run: |
         uv run pytest . --pylint -m pylint --pylint-rcfile=.pylintrc
@@ -60,7 +60,7 @@ jobs:
         uv sync --all-extras --dev
         uv pip install third-party/bilevel-planning
         uv pip install third-party/prbench-models
-        uv pip install third-party/prbench-models/third-party/prbench
+        uv pip install third-party/prbench-models/third-party/prbench[geom2d]
     - name: Mypy
       run: |
         uv run mypy .
@@ -89,7 +89,7 @@ jobs:
         uv sync --all-extras --dev
         uv pip install third-party/bilevel-planning
         uv pip install third-party/prbench-models
-        uv pip install third-party/prbench-models/third-party/prbench
+        uv pip install third-party/prbench-models/third-party/prbench[geom2d]
     - name: Pytest
       run: |
        uv run pytest tests/

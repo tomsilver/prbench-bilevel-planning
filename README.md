@@ -10,4 +10,4 @@
 4. Install the submodules:
     - `pip install -e third-party/bilevel-planning`
     - `pip install -e third-party/prbench-models`
-    - `pip install -e third-party/prbench-models/third-party/prbench`
+    - `pip install -e third-party/prbench-models/third-party/prbench[geom2d]`
