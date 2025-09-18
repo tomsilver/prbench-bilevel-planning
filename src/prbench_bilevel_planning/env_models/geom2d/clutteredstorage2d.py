@@ -16,7 +16,7 @@ from bilevel_planning.trajectory_samplers.trajectory_sampler import (
 from gymnasium.spaces import Space
 from numpy.typing import NDArray
 from prbench.envs.geom2d.clutteredstorage2d import (
-    ClutteredStorage2DEnvSpec,
+    ClutteredStorage2DEnvConfig,
     ObjectCentricClutteredStorage2DEnv,
     ShelfType,
     TargetBlockType,
@@ -32,7 +32,7 @@ from prbench.envs.geom2d.utils import (
     is_inside_shelf,
     run_motion_planning_for_crv_robot,
     snap_suctioned_objects,
-    state_has_collision,
+    state_2d_has_collision,
 )
 from prbench_models.geom2d.utils import (
     Geom2dRobotController,
@@ -57,12 +57,12 @@ def create_bilevel_planning_models(
     assert isinstance(action_space, CRVRobotActionSpace)
 
     sim = ObjectCentricClutteredStorage2DEnv(num_blocks=num_blocks)
-    env_spec = ClutteredStorage2DEnvSpec()
-    world_x_min = env_spec.world_min_x + env_spec.robot_base_radius
-    world_x_max = env_spec.world_max_x - env_spec.robot_base_radius
-    world_y_min = env_spec.world_min_y + env_spec.robot_base_radius
+    env_config = ClutteredStorage2DEnvConfig()
+    world_x_min = env_config.world_min_x + env_config.robot_base_radius
+    world_x_max = env_config.world_max_x - env_config.robot_base_radius
+    world_y_min = env_config.world_min_y + env_config.robot_base_radius
     world_y_max = (
-        env_spec.world_max_y - env_spec.shelf_height - env_spec.robot_base_radius
+        env_config.world_max_y - env_config.shelf_height - env_config.robot_base_radius
     )
 
     # Convert observations into states. The important thing is that states are hashable.
@@ -505,7 +505,7 @@ def create_bilevel_planning_models(
                 # Check collision
                 moving_objects = {self._robot} | {o for o, _ in suctioned_objects}
                 static_objects = set(full_state) - moving_objects
-                if not state_has_collision(
+                if not state_2d_has_collision(
                     full_state, moving_objects, static_objects, {}
                 ):
                     break

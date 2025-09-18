@@ -8,7 +8,7 @@ import prbench
 import pytest
 from conftest import MAKE_VIDEOS
 from gymnasium.wrappers import RecordVideo
-from prbench.envs.geom2d.stickbutton2d import StickButton2DEnvSpec
+from prbench.envs.geom2d.stickbutton2d import StickButton2DEnvConfig
 
 from prbench_bilevel_planning.agent import BilevelPlanningAgent
 from prbench_bilevel_planning.env_models import create_bilevel_planning_models
@@ -227,12 +227,13 @@ def _skill_test_helper(ground_skill, env_models, env, obs, params=None, debug=Fa
 def test_stickbutton2d_skills():
     """Tests for skills in the StickButton2D environment."""
     env = prbench.make("prbench/StickButton2D-b5-v0")
-    env_spec = StickButton2DEnvSpec()
+    env_config = StickButton2DEnvConfig()
     onfloor_y = (
-        env_spec.world_min_y
-        + (env_spec.world_max_y - env_spec.world_min_y - env_spec.table_shape[1]) / 2
+        env_config.world_min_y
+        + (env_config.world_max_y - env_config.world_min_y - env_config.table_shape[1])
+        / 2
     )
-    ontable_y = env_spec.world_max_y - env_spec.table_shape[1] / 2
+    ontable_y = env_config.world_max_y - env_config.table_shape[1] / 2
     env_models = create_bilevel_planning_models(
         "stickbutton2d", env.observation_space, env.action_space, num_buttons=5
     )
